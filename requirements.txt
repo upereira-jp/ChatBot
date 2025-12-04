@@ -1,2 +1,12 @@
-pip @ file:///build/pip-24.3.1-py3-none-any.whl
+fastapi
+uvicorn
+requests
+pydantic
+python-dotenv
+openai
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+SQLAlchemy
+psycopg2-binary
 gunicorn
