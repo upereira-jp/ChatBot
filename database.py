@@ -1,143 +1,139 @@
-from datetime import datetime, timedelta
-import json
+# database.py - Versão Final para PostgreSQL (SQLAlchemy)
 
-DB_PATH = "agenda.db"
-DB = sqlite_utils.Database(DB_PATH)
+import os
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, func
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.exc import SQLAlchemyError
 
+# 1. Configuração do Banco de Dados
+# O Render injeta a URL de conexão no DATABASE_URL
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    # Esta é uma URL de fallback, mas o Render deve fornecer a correta
+    raise ValueError("DATABASE_URL environment variable not set.")
+
+# Cria o engine de conexão
+engine = create_engine(DATABASE_URL)
+
+# Base Declarativa para os modelos
+Base = declarative_base()
+
+# 2. Definição dos Modelos (Tabelas)
+
+class Token(Base):
+    """Modelo para armazenar o token de acesso do Google Calendar."""
+    __tablename__ = "tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, unique=True, index=True)
+    token_json = Column(String)
+
+class Compromisso(Base):
+    """Modelo para armazenar os compromissos agendados via WhatsApp."""
+    __tablename__ = "compromissos"
+    id = Column(Integer, primary_key=True, index=True)
+    titulo = Column(String)
+    data_hora = Column(DateTime)
+    assunto = Column(String)
+    duracao = Column(Integer)  # Duração em minutos
+    recorrencia = Column(String, nullable=True)
+    # Adiciona um campo para rastrear o ID do evento no Google Calendar
+    google_event_id = Column(String, nullable=True)
+
+# 3. Inicialização do Banco de Dados
 def initialize_db():
-    """
-    Inicializa o banco de dados e cria a tabela 'compromissos' se ela não existir.
-    """
-    if "compromissos" not in DB.table_names():
-        DB["compromissos"].create(
-            {
-                "id": int,
-                "whatsapp_id": str, # ID do usuário do WhatsApp
-                "titulo": str,
-                "data_hora_inicio": datetime,
-                "data_hora_fim": datetime,
-                "assunto_servico": str,
-                "duracao_minutos": int,
-                "recorrencia": str, # Armazenar regras de recorrência (ex: 'DAILY', 'WEEKLY')
-                "data_criacao": datetime,
-                "status": str # 'agendado', 'cancelado', 'concluido'
-            },
-            pk="id"
-        )
-        # Criar índice para consultas rápidas por usuário e data
-        DB["compromissos"].create_index(["whatsapp_id", "data_hora_inicio"])
-        print(f"Tabela 'compromissos' criada em {DB_PATH}")
-
-def save_compromisso(whatsapp_id: str, titulo: str, data_hora_inicio: datetime, duracao_minutos: int, assunto_servico: str, recorrencia: str = None):
-    """
-    Salva um novo compromisso no banco de dados.
-    """
-    data_hora_fim = data_hora_inicio + timedelta(minutes=duracao_minutos)
-    
-    compromisso = {
-        "whatsapp_id": whatsapp_id,
-        "titulo": titulo,
-        "data_hora_inicio": data_hora_inicio.isoformat(),
-        "data_hora_fim": data_hora_fim.isoformat(),
-        "assunto_servico": assunto_servico,
-        "duracao_minutos": duracao_minutos,
-        "recorrencia": recorrencia,
-        "data_criacao": datetime.now().isoformat(),
-        "status": "agendado"
-    }
-    
-    DB["compromissos"].insert(compromisso, alter=True)
-    return compromisso
-
-def get_compromissos_by_day(whatsapp_id: str, date: datetime.date):
-    """
-    Busca compromissos agendados para um dia específico.
-    """
-    start_of_day = datetime.combine(date, datetime.min.time()).isoformat()
-    end_of_day = datetime.combine(date, datetime.max.time()).isoformat()
-    
-    results = DB.query(
-        """
-        SELECT * FROM compromissos
-        WHERE whatsapp_id = ?
-        AND data_hora_inicio >= ?
-        AND data_hora_inicio <= ?
-        AND status = 'agendado'
-        ORDER BY data_hora_inicio
-        """,
-        [whatsapp_id, start_of_day, end_of_day]
-    )
-    return list(results)
-
-def update_compromisso(id_compromisso: int, **kwargs):
-    """
-    Atualiza um compromisso existente.
-    """
-    DB["compromissos"].update(id_compromisso, kwargs)
-    return DB["compromissos"].get(id_compromisso)
-
-def delete_compromisso(id_compromisso: int):
-    """
-    Exclui um compromisso existente.
-    """
-    DB["compromissos"].delete(id_compromisso)
-    return True
-
-def get_compromisso_by_id(id_compromisso: int):
-    """
-    Busca um compromisso pelo ID.
-    """
+    """Cria as tabelas no banco de dados se elas não existirem."""
     try:
-        return DB["compromissos"].get(id_compromisso)
-    except sqlite_utils.db.NotFoundError:
-        return None
+        Base.metadata.create_all(bind=engine)
+        print("Database tables created successfully.")
+    except SQLAlchemyError as e:
+        print(f"Error creating database tables: {e}")
 
-def get_compromissos_by_whatsapp_id(whatsapp_id: str):
-    """
-    Busca todos os compromissos de um usuário.
-    """
-    results = DB.query(
-        """
-        SELECT * FROM compromissos
-        WHERE whatsapp_id = ?
-        AND status = 'agendado'
-        ORDER BY data_hora_inicio
-        """,
-        [whatsapp_id]
-    )
-    return list(results)
+# 4. Criação da Sessão
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Funções de update, delete e recorrência serão adicionadas conforme a Fase 6.
+# 5. Funções de CRUD para Compromissos
 
-if __name__ == '__main__':
-    # Teste de inicialização e inserção
-    initialize_db()
-    
-    # Exemplo de uso
-    from datetime import timedelta
-    
-    # Limpar a tabela para o teste
-    DB["compromissos"].delete_where("1")
-    
-    # Criar um compromisso de teste
-    data_teste = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    save_compromisso(
-        whatsapp_id="5511999999999",
-        titulo="Reunião com Cliente X",
-        data_hora_inicio=data_teste,
-        duracao_minutos=60,
-        assunto_servico="Apresentação de Proposta"
+def get_db():
+    """Função utilitária para obter uma sessão de banco de dados."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def create_compromisso(db, titulo: str, data_hora: datetime, assunto: str, duracao: int, recorrencia: str = None):
+    """Cria um novo compromisso no banco de dados."""
+    db_compromisso = Compromisso(
+        titulo=titulo,
+        data_hora=data_hora,
+        assunto=assunto,
+        duracao=duracao,
+        recorrencia=recorrencia
     )
+    db.add(db_compromisso)
+    db.commit()
+    db.refresh(db_compromisso)
+    return db_compromisso
+
+def get_compromissos_do_dia(db, data: datetime):
+    """Retorna todos os compromissos para uma data específica."""
+    start_of_day = data.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = data.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    # Consultar compromissos
-    compromissos_amanha = get_compromissos_by_day(
-        whatsapp_id="5511999999999",
-        date=data_teste.date()
-    )
-    
-    print("\nCompromissos para amanhã:")
-    print(json.dumps(compromissos_amanha, indent=2))
-    
-    # Verificar se o compromisso foi salvo
-    assert len(compromissos_amanha) == 1
-    print("\nTeste de banco de dados concluído com sucesso!")
+    return db.query(Compromisso).filter(
+        Compromisso.data_hora >= start_of_day,
+        Compromisso.data_hora <= end_of_day
+    ).order_by(Compromisso.data_hora).all()
+
+def update_compromisso(db, compromisso_id: int, novos_dados: dict):
+    """Atualiza um compromisso existente."""
+    db_compromisso = db.query(Compromisso).filter(Compromisso.id == compromisso_id).first()
+    if db_compromisso:
+        for key, value in novos_dados.items():
+            setattr(db_compromisso, key, value)
+        db.commit()
+        db.refresh(db_compromisso)
+        return db_compromisso
+    return None
+
+def delete_compromisso(db, compromisso_id: int):
+    """Deleta um compromisso pelo ID."""
+    db_compromisso = db.query(Compromisso).filter(Compromisso.id == compromisso_id).first()
+    if db_compromisso:
+        db.delete(db_compromisso)
+        db.commit()
+        return True
+    return False
+
+# 6. Funções de CRUD para Token (Google Calendar)
+
+def save_token(db, user_id: str, token_json: str):
+    """Salva ou atualiza o token de acesso do Google Calendar."""
+    db_token = db.query(Token).filter(Token.user_id == user_id).first()
+    if db_token:
+        db_token.token_json = token_json
+    else:
+        db_token = Token(user_id=user_id, token_json=token_json)
+        db.add(db_token)
+    db.commit()
+    db.refresh(db_token)
+    return db_token
+
+def get_token(db, user_id: str):
+    """Obtém o token de acesso do Google Calendar."""
+    return db.query(Token).filter(Token.user_id == user_id).first()
+
+def delete_token(db, user_id: str):
+    """Deleta o token de acesso do Google Calendar."""
+    db_token = db.query(Token).filter(Token.user_id == user_id).first()
+    if db_token:
+        db.delete(db_token)
+        db.commit()
+        return True
+    return False
+
+# 7. Chamada de Inicialização (para ser chamada no main.py)
+# A função initialize_db() deve ser chamada uma vez na inicialização do FastAPI.
