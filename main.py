@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import json
 from nlp_processor import process_message_with_ai
 from google_calendar_service import start_auth_flow, finish_auth_flow, get_google_calendar_service, create_google_event, update_google_event, delete_google_event
-from database import initialize_db, create_compromisso, get_compromissos_by_day, update_compromisso, delete_compromisso, get_compromisso_by_id, get_compromissos_by_whatsapp_id
+from database import initialize_db, create_compromisso, get_compromissos_do_dia, update_compromisso, delete_compromisso, get_compromisso_by_id, get_compromissos_by_whatsapp_id
 from whatsapp_api import send_whatsapp_message
 from dotenv import load_dotenv
 import os
