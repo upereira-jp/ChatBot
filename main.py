@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, Request, Depends, HTTPException
+from starlette.responses import Response
 from sqlalchemy.orm import Session
 
 # Importações Corrigidas (Absolutas e Nomes Corretos)
@@ -66,10 +67,12 @@ def verify_webhook(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-
     if mode and token:
+        # ATENÇÃO: Substitua VERIFY_TOKEN pela forma como você carrega o token (ex: os.getenv("WHATSAPP_VERIFY_TOKEN"))
+        # Se VERIFY_TOKEN for uma variável global, mantenha-a.
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            return challenge
+            # CORREÇÃO: Retorna o desafio como texto simples (text/plain)
+            return Response(content=challenge, media_type="text/plain")
         else:
             raise HTTPException(status_code=403, detail="Token de verificação inválido.")
     raise HTTPException(status_code=400, detail="Parâmetros ausentes.")
