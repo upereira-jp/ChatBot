@@ -55,6 +55,9 @@ def initialize_db():
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # 5. Funções de CRUD para Compromissos
+def get_compromisso_por_id(db, compromisso_id: int):
+    """Retorna um compromisso pelo ID."""
+    return db.query(Compromisso).filter(Compromisso.id == compromisso_id).first()
 
 def get_db():
     """Função utilitária para obter uma sessão de banco de dados."""
