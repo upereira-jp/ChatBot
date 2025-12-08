@@ -82,6 +82,8 @@ async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db
     """Processa as mensagens recebidas do WhatsApp (POST request)."""
     try:
         data = await request.json()
+
+        print(f"DEBUG: Recebido POST da Meta: {json.dumps(data)}")
         
         # Lógica para extrair a mensagem de texto (simplificada)
         message_text = ""
