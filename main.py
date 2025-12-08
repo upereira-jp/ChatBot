@@ -79,26 +79,21 @@ def verify_webhook(request: Request):
 
 @app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db)):
-    """Processa as mensagens recebidas do WhatsApp (POST request)."""
     try:
         data = await request.json()
+        print(f"LOG ENTRADA: {json.dumps(data)}")
 
-        print(f"DEBUG: Recebido POST da Meta: {json.dumps(data)}")
-        
-        # Lógica para extrair a mensagem de texto (simplificada)
-        message_text = ""
-        # ... (Sua lógica de extração de mensagem aqui) ...
-        
-        # Simulação de extração de mensagem para teste
-        # Você deve implementar a lógica real de extração de 'data'
-        
-        # Apenas para fins de teste, vamos assumir que a mensagem está em 'data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]'
-        try:
-            message_text = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
-            from_number = data["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
-        except (KeyError, IndexError):
-            # Ignora notificações de status, etc.
-            return {"status": "ok", "message": "Ignorando notificação de status."}
+        # 1. Tenta extrair do n8n (formato simples que você vai configurar lá)
+        message_text = data.get("text")
+        from_number = data.get("from")
+
+        # 2. Se falhar, tenta extrair do formato oficial da Meta
+        if not message_text:
+            try:
+                message_text = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
+                from_number = data["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
+            except (KeyError, IndexError):
+                return {"status": "ignored", "message": "Formato de mensagem não reconhecido ou notificação de status."}
 
         # 1. Processamento de IA
         ai_result: AgendaAction = process_message_with_ai(message_text)
