@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, Depends, HTTPException
 from sqlalchemy.orm import Session
 import json
+from datetime import datetime
 from whatsapp_api import send_whatsapp_message
 from nlp_processor import process_message_with_ai, AgendaAction
 from database import get_db, get_token, save_token, create_compromisso, get_compromissos_do_dia, update_compromisso, delete_compromisso, get_compromisso_por_id
