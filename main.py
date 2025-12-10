@@ -113,6 +113,12 @@ async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db
         
         return {"status": "ok", "message": "Mensagem processada."}
 
+
+@app.get("/")
+def read_root():
+    return {"message": "Servidor está funcionando!"}
+
+
     except Exception as e:
         # Caso haja algum erro
         print(f"Erro no processamento da mensagem: {e}")
