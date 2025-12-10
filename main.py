@@ -114,7 +114,7 @@ async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db
         return {"status": "ok", "message": "Mensagem processada."}
 
 
-@app.get("/")
+@app.get(https://agenda-ia-whatsapp-v8bu.onrender.com)
 def read_root():
     return {"message": "Servidor está funcionando!"}
 
