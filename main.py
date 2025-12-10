@@ -10,15 +10,16 @@ from google_calendar_service import create_google_event, update_google_event, de
 # Inicializa a aplicação FastAPI
 app = FastAPI()
 
-# Rota para processar mensagens do WhatsApp
+# Rota para processar mensagens do WhatsApp (Meta API)
 @app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db)):
     try:
         data = await request.json()
         print(f"LOG ENTRADA: {json.dumps(data)}")
 
-        message_text = data.get("text")
-        from_number = data.get("from")
+        # Meta WhatsApp envia as mensagens em um formato diferente
+        message_text = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body']
+        from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
 
         # Processamento de IA
         ai_result: AgendaAction = process_message_with_ai(message_text)
