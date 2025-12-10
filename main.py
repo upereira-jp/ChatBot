@@ -1,8 +1,15 @@
-# Importações
-from whatsapp_api import send_whatsapp_message  # Certifique-se que o Twilio está sendo utilizado aqui!
+from fastapi import FastAPI, Request, Depends, HTTPException
+from sqlalchemy.orm import Session
+import json
+from whatsapp_api import send_whatsapp_message  # Certifique-se de que o Twilio está sendo utilizado aqui!
+from nlp_processor import process_message_with_ai, AgendaAction
+from database import get_db, get_token, save_token, create_compromisso, get_compromissos_do_dia, update_compromisso, delete_compromisso, get_compromisso_por_id
+from google_calendar_service import create_google_event, update_google_event, delete_google_event
+
+# Inicializa a aplicação FastAPI
+app = FastAPI()
 
 # Rota para processar mensagens do WhatsApp
-@app.post("/webhook/whatsapp")
 @app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db)):
     try:
@@ -19,7 +26,7 @@ async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db
         response_message = ""
         
         # Verifique se o token do Google Calendar está disponível
-        token_record = get_token(db, user_id=MAIN_USER_ID)
+        token_record = get_token(db, user_id="main_user")  # Use o ID correto
         google_token = json.loads(token_record.token_json) if token_record else None
 
         # Verifica a ação que o usuário deseja realizar
