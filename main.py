@@ -3,6 +3,7 @@ from whatsapp_api import send_whatsapp_message  # Certifique-se que o Twilio est
 
 # Rota para processar mensagens do WhatsApp
 @app.post("/webhook/whatsapp")
+@app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db)):
     try:
         data = await request.json()
