@@ -2,9 +2,9 @@ from twilio.rest import Client
 import os
 
 # Obtém as credenciais do Twilio através das variáveis de ambiente
-TWILIO_ACCOUNT_SID = os.environ.get("ACe5d742a601be8a21319aeaedc49cc367")
-TWILIO_AUTH_TOKEN = os.environ.get("5ed74083ed8dc84424e03a4ed5229ab1")
-TWILIO_PHONE_NUMBER = os.environ.get("whatsapp: +14155238886")  # Número de WhatsApp do Twilio
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
 
 # Certifique-se de que as variáveis de ambiente estão configuradas corretamente
 if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
