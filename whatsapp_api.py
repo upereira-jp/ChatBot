@@ -1,46 +1,26 @@
+from twilio.rest import Client
 import os
-import requests
-from dotenv import load_dotenv
 
-load_dotenv()
+# Obtém as credenciais do Twilio através das variáveis de ambiente
+TWILIO_ACCOUNT_SID = os.environ.get("ACe5d742a601be8a21319aeaedc49cc367")
+TWILIO_AUTH_TOKEN = os.environ.get("5ed74083ed8dc84424e03a4ed5229ab1")
+TWILIO_PHONE_NUMBER = os.environ.get("whatsapp: +14155238886")  # Número de WhatsApp do Twilio
 
-# Variáveis de ambiente para a API do WhatsApp
-WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
-WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
-API_URL = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+# Certifique-se de que as variáveis de ambiente estão configuradas corretamente
+if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
+    raise ValueError("Certifique-se de que todas as variáveis de ambiente do Twilio estão configuradas.")
 
-def send_whatsapp_message(to_number: str, message_body: str):
-    """
-    Envia uma mensagem de texto para um número de WhatsApp usando a Meta Cloud API.
-    """
-    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
-        print("ERRO: Variáveis de ambiente WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configuradas.")
-        return False
+client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "text",
-        "text": {
-            "body": message_body
-        }
-    }
-
+def send_whatsapp_message(to: str, message: str):
+    """Envia uma mensagem via WhatsApp usando o Twilio."""
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status() # Levanta exceção para códigos de status HTTP ruins (4xx ou 5xx)
-        print(f"Mensagem enviada com sucesso para {to_number}. Resposta: {response.json()}")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"ERRO ao enviar mensagem para {to_number}: {e}")
-        return False
-
-if __name__ == '__main__':
-    # Exemplo de uso (requer variáveis de ambiente configuradas)
-    # send_whatsapp_message("5511999999999", "Olá! Teste de envio de mensagem.")
-    print("Módulo whatsapp_api.py pronto para uso.")
+        # Envia a mensagem para o número 'to' com o conteúdo 'message'
+        message = client.messages.create(
+            body=message,
+            from_='whatsapp:' + TWILIO_PHONE_NUMBER,  # O número do Twilio
+            to='whatsapp:' + to  # O número de destino do WhatsApp
+        )
+        print(f"Mensagem enviada para {to}: {message.sid}")
+    except Exception as e:
+        print(f"Erro ao enviar mensagem: {e}")
