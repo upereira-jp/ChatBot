@@ -1,213 +1,221 @@
-from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse
-from sqlalchemy.orm import Session
+import os
 import json
-from datetime import datetime
-from whatsapp_api import send_whatsapp_message
-from nlp_processor import process_message_with_ai, AgendaAction
-from database import (
-    get_db,
-    get_token,
-    save_token,
-    create_compromisso,
-    get_compromissos_do_dia,
-    update_compromisso,
-    delete_compromisso,
-    get_compromisso_por_id
-)
-# --- IMPORTAÇÕES AJUSTADAS ---
-from google_calendar_service import (
-    create_google_event,
-    update_google_event,
-    delete_google_event,
-    # Importando as novas funções de autenticação
-    start_auth_flow,
-    handle_auth_callback 
-)
-# --- FIM DAS IMPORTAÇÕES AJUSTADAS ---
+import base64
+from datetime import timedelta
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
 
-# Inicializa a aplicação FastAPI
-app = FastAPI()
+# --- Configuração ---
 
-# ID Fixo para o token na base de dados
-MAIN_USER_ID = "main_user" 
+# O Render injeta o conteúdo do credentials.json codificado em Base64 na variável de ambiente
+CREDENTIALS_BASE64 = os.environ.get("GOOGLE_CREDENTIALS_BASE64")
 
-# --- ROTAS DE AUTENTICAÇÃO DO GOOGLE CALENDAR ---
+# Escopos necessários para ler e escrever no calendário
+SCOPES = ['https://www.googleapis.com/auth/calendar']
 
-## 🔑 Rota 1: Iniciar o Fluxo OAuth
-@app.get("/auth/google/start")
-async def google_auth_start():
+# URL de redirecionamento (Callback). 
+# Em produção (Render), deve ser a URL da sua aplicação. Localmente, localhost.
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+# Remove barra no final se houver, para evitar urls duplas como //.com//auth
+if RENDER_URL.endswith('/'):
+    RENDER_URL = RENDER_URL[:-1]
+REDIRECT_URI = f"{RENDER_URL}/auth/google/callback"
+
+# --- Funções Auxiliares de Configuração ---
+
+def load_client_config():
     """
-    Inicia o fluxo de autorização do Google, usando a função start_auth_flow
-    do google_calendar_service.
+    Decodifica as credenciais do Google (client_secret) da variável de ambiente Base64.
+    Isso evita ter o arquivo físico client_secret.json no servidor.
     """
+    if not CREDENTIALS_BASE64:
+        raise ValueError("A variável de ambiente GOOGLE_CREDENTIALS_BASE64 não está definida.")
+    
+    # Decodifica o Base64 para obter o JSON string
     try:
-        # Chama a função renomeada no serviço
-        auth_url = start_auth_flow() 
-        
-        # Redireciona o navegador do usuário para a página de login do Google
-        return RedirectResponse(auth_url)
+        credentials_json_bytes = base64.b64decode(CREDENTIALS_BASE64)
+        credentials_info = json.loads(credentials_json_bytes.decode('utf-8'))
     except Exception as e:
-        print(f"Erro ao iniciar o fluxo de autenticação: {e}")
-        return HTMLResponse(
-            content=f"<h1>Erro ao iniciar o Google Auth</h1><p>Detalhe: {e}</p><p>Verifique se as variáveis de ambiente GOOGLE_CREDENTIALS_BASE64 e RENDER_EXTERNAL_URL estão corretas.</p>",
-            status_code=500
-        )
+        raise ValueError(f"Erro ao decodificar GOOGLE_CREDENTIALS_BASE64: {e}")
+    
+    # Monta a configuração do cliente para o Flow
+    return {
+        "web": {
+            "client_id": credentials_info["web"]["client_id"],
+            "client_secret": credentials_info["web"]["client_secret"],
+            "auth_uri": credentials_info["web"]["auth_uri"],
+            "token_uri": credentials_info["web"]["token_uri"],
+            "redirect_uris": [REDIRECT_URI]
+        }
+    }
 
-## 🔄 Rota 2: Callback do Google (A URL que o Google usa para retornar)
-@app.get("/auth/google/callback")
-async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
+# --- 1. Funções de Autenticação (OAuth 2.0) ---
+
+def start_auth_flow():
     """
-    Recebe o código de autorização do Google, troca por um token e salva no DB.
+    Inicia o fluxo de autenticação e retorna a URL para onde o usuário deve ser redirecionado.
     """
+    client_config = load_client_config()
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # Gera a URL de autorização. 
+    # access_type='offline' é crucial para receber um refresh_token
+    authorization_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true'
+    )
+    
+    return authorization_url
+
+def handle_auth_callback(code: str) -> str:
+    """
+    Recebe o código de autorização devolvido pelo Google, troca por tokens
+    e retorna o JSON dos tokens como string.
+    """
+    client_config = load_client_config()
+    
+    flow = Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # Troca o código (code) pelos tokens de acesso e refresh
+    flow.fetch_token(code=code)
+    
+    # Retorna as credenciais serializadas em JSON
+    return flow.credentials.to_json()
+
+# --- 2. Função para Obter o Serviço da API ---
+
+def get_calendar_service(token_json: str):
+    """
+    Reconstrói as credenciais a partir do JSON salvo e retorna o serviço da API.
+    Lida com a renovação automática do token se ele estiver expirado.
+    """
+    if not token_json:
+        return None
+
     try:
-        # O código de autorização é enviado pelo Google como um query parameter 'code'
-        auth_code = request.query_params.get("code")
+        # Carrega as credenciais a partir da string JSON salva no banco
+        creds_dict = json.loads(token_json)
+        creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
         
-        if not auth_code:
-            return HTMLResponse(
-                content="<h1>❌ Erro de Autenticação</h1><p>O Google não retornou o código de autorização ('code').</p>",
-                status_code=400
-            )
+        # Verifica se o token expirou e tenta renovar
+        if creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+            except Exception as e:
+                print(f"Erro ao renovar token: {e}")
+                return None
 
-        # Chama a função renomeada no serviço para trocar o código pelo token
-        token_json_string = handle_auth_callback(auth_code)
-        
-        # Salva o token (string JSON) no banco de dados
-        save_token(db, user_id=MAIN_USER_ID, token_json=token_json_string)
-        
-        # Retorna uma mensagem de sucesso para o usuário
-        return HTMLResponse(
-            content="<h1>✅ Autenticação Concluída com Sucesso!</h1><p>O Google Calendar está agora sincronizado. Você pode fechar esta página.</p>",
-            status_code=200
-        )
-        
+        # Constrói o serviço
+        service = build('calendar', 'v3', credentials=creds)
+        return service
     except Exception as e:
-        print(f"Erro no callback do Google: {e}")
-        return HTMLResponse(
-            content=f"<h1>❌ Erro na Autenticação</h1><p>Ocorreu um problema ao salvar o token. Detalhe: {e}</p><p>Certifique-se de que a sua URL de redirecionamento (`{REDIRECT_URI}`) está configurada no Google Cloud Console.</p>",
-            status_code=500
-        )
+        print(f"Erro ao criar serviço do Calendar: {e}")
+        return None
 
-# --- ROTAS DA APLICAÇÃO ---
+# --- 3. Funções de CRUD (Create, Update, Delete) ---
 
-# Rota para verificar se o servidor está funcionando
-@app.get("/")
-def read_root():
-    return {"message": "Servidor está funcionando!"}
+# NOTA: O parâmetro 'compromisso' abaixo NÃO tem tipagem explícita da classe (ex: :Compromisso)
+# para evitar a IMPORTAÇÃO CIRCULAR com database.py. O código assume que o objeto
+# passado possui os atributos: titulo, assunto, data_hora, duracao, id, google_event_id.
 
-# Rota para processar mensagens do WhatsApp (Meta API)
-@app.post("/webhook/whatsapp")
-async def handle_whatsapp_message(request: Request, db: Session = Depends(get_db)):
+def create_google_event(token_json: str, compromisso):
+    """
+    Cria um evento no Google Calendar.
+    """
+    service = get_calendar_service(token_json)
+    if not service:
+        print("Serviço do Google Calendar não disponível (Token inválido?).")
+        return None
+
     try:
-        data = await request.json()
-        print(f"LOG ENTRADA: {json.dumps(data)}")
+        # Define horário de início e fim
+        start_time = compromisso.data_hora
+        # Assume duração em minutos, padrão 60 se não houver
+        duracao_minutos = getattr(compromisso, 'duracao', 60) or 60 
+        end_time = start_time + timedelta(minutes=duracao_minutos)
 
-        # Extração de dados (adapte conforme o formato real do Meta)
-        try:
-            message_entry = data['entry'][0]['changes'][0]['value']
-            message_data = message_entry['messages'][0]
-            message_text = message_data['text']['body']
-            from_number = message_data['from']
-        except (IndexError, KeyError):
-            # Lidar com notificações de status ou outros payloads não-mensagem
-            return {"status": "ignored", "message": "Payload não contém uma mensagem de texto."}
+        event_body = {
+            'summary': compromisso.titulo,
+            'description': f"{compromisso.assunto}\n\nAgendado via WhatsApp Bot.",
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': 'America/Sao_Paulo', # Ajuste seu fuso horário se necessário
+            },
+            'end': {
+                'dateTime': end_time.isoformat(),
+                'timeZone': 'America/Sao_Paulo',
+            },
+        }
 
-
-        # Processamento de IA
-        ai_result: AgendaAction = process_message_with_ai(message_text)
-
-        # Lógica de Ação
-        response_message = ""
-
-        # Verifique se o token do Google Calendar está disponível
-        token_record = get_token(db, user_id=MAIN_USER_ID)
-        google_token = json.loads(token_record.token_json) if token_record else None
-
-        # Ações para criar, reagendar, cancelar e consultar compromissos
-        if ai_result.action == "agendar":
-            if not ai_result.data_hora:
-                response_message = "Não consegui identificar a data e hora. Por favor, especifique melhor."
-            else:
-                compromisso = create_compromisso(
-                    db,
-                    titulo=ai_result.titulo,
-                    data_hora=ai_result.data_hora,
-                    assunto=ai_result.assunto,
-                    duracao=ai_result.duracao,
-                    recorrencia=ai_result.recorrencia
-                )
-                response_message = f"Compromisso agendado com sucesso! ID Local: {compromisso.id}. Título: {compromisso.titulo} em {compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                
-                if google_token:
-                    event_id = create_google_event(google_token, compromisso)
-                    if event_id and event_id != "google_event_id_placeholder": # Verifica se o ID real foi retornado
-                        update_compromisso(db, compromisso.id, {"google_event_id": event_id})
-                        response_message += f" Sincronizado com o Google Calendar."
-                    else:
-                        response_message += f" \n\n⚠️ O compromisso foi agendado localmente, mas a sincronização com o Google Calendar falhou. (Verifique o log do create_google_event)."
-                else:
-                    response_message += f" \n\n⚠️ **Atenção:** O Google Calendar não está sincronizado. Acesse a rota /auth/google/start para autorizar."
-
-
-        elif ai_result.action == "reagendar":
-            if not ai_result.id_compromisso or not ai_result.data_hora:
-                response_message = "Para reagendar, preciso do ID do compromisso e da nova data/hora."
-            else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
-                if compromisso:
-                    update_compromisso(db, compromisso.id, {"data_hora": ai_result.data_hora})
-                    response_message = f"Compromisso ID {compromisso.id} reagendado para {ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                    
-                    if google_token and compromisso.google_event_id:
-                        update_google_event(google_token, compromisso)
-                        response_message += " Sincronizado com o Google Calendar."
-                else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
-
-        elif ai_result.action == "cancelar":
-            if not ai_result.id_compromisso:
-                response_message = "Para cancelar, preciso do ID do compromisso."
-            else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
-                if compromisso:
-                    delete_compromisso(db, compromisso.id)
-                    response_message = f"Compromisso ID {compromisso.id} cancelado com sucesso."
-                    
-                    if google_token and compromisso.google_event_id:
-                        delete_google_event(google_token, compromisso.google_event_id)
-                        response_message += " Sincronizado com o Google Calendar."
-                else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
-
-        elif ai_result.action == "consultar":
-            data_consulta = ai_result.data_hora.date() if ai_result.data_hora else datetime.now().date()
-            compromissos = get_compromissos_do_dia(db, datetime.combine(data_consulta, datetime.min.time()))
-            
-            if compromissos:
-                lista = "\n".join([f"ID {c.id}: {c.titulo} ({c.assunto}) às {c.data_hora.strftime('%H:%M')}" for c in compromissos])
-                response_message = f"Compromissos para {data_consulta.strftime('%d/%m/%Y')}:\n{lista}"
-            else:
-                response_message = f"Nenhum compromisso encontrado para {data_consulta.strftime('%d/%m/%Y')}."
-
-        else:
-            response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
-
-        # Envia a resposta de volta via WhatsApp
-        send_whatsapp_message(from_number, response_message)
-        
-        return {"status": "ok", "message": "Mensagem processada."}
+        event = service.events().insert(calendarId='primary', body=event_body).execute()
+        print(f"Evento criado no Google Calendar: {event.get('htmlLink')}")
+        return event.get('id')
 
     except Exception as e:
-        import traceback
-        error_detail = f"Erro no processamento da mensagem: {e}\n{traceback.format_exc()}"
-        print(error_detail)
-        
-        # Tenta enviar a mensagem de erro, se o from_number estiver disponível
-        try:
-            from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
-        except:
-            pass 
+        print(f"Erro ao criar evento no Google Calendar: {e}")
+        return None
 
-        raise HTTPException(status_code=500, detail=str(e))
+def update_google_event(token_json: str, compromisso):
+    """
+    Atualiza um evento existente no Google Calendar.
+    """
+    if not compromisso.google_event_id:
+        print("Compromisso não possui ID do Google Calendar para atualizar.")
+        return
+
+    service = get_calendar_service(token_json)
+    if not service:
+        return
+
+    try:
+        # Recupera o evento atual para não perder dados que não vamos mudar
+        event = service.events().get(calendarId='primary', eventId=compromisso.google_event_id).execute()
+
+        # Atualiza horários
+        start_time = compromisso.data_hora
+        duracao_minutos = getattr(compromisso, 'duracao', 60) or 60
+        end_time = start_time + timedelta(minutes=duracao_minutos)
+
+        event['summary'] = compromisso.titulo
+        event['description'] = f"{compromisso.assunto}\n\nAgendado via WhatsApp Bot (Atualizado)."
+        event['start']['dateTime'] = start_time.isoformat()
+        event['end']['dateTime'] = end_time.isoformat()
+
+        updated_event = service.events().update(
+            calendarId='primary', 
+            eventId=compromisso.google_event_id, 
+            body=event
+        ).execute()
+        
+        print(f"Evento atualizado no Google Calendar: {updated_event.get('htmlLink')}")
+
+    except Exception as e:
+        print(f"Erro ao atualizar evento no Google Calendar: {e}")
+
+def delete_google_event(token_json: str, google_event_id: str):
+    """
+    Deleta um evento do Google Calendar.
+    """
+    if not google_event_id:
+        return
+
+    service = get_calendar_service(token_json)
+    if not service:
+        return
+
+    try:
+        service.events().delete(calendarId='primary', eventId=google_event_id).execute()
+        print(f"Evento {google_event_id} deletado do Google Calendar.")
+    except Exception as e:
+        print(f"Erro ao deletar evento no Google Calendar: {e}")
