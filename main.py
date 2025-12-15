@@ -1,8 +1,13 @@
+# main.py — versão limpa (U+00A0 removido, indentação normalizada)
+
 from fastapi import FastAPI, Request, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 import json
-from datetime import datetime, time, date
+import traceback
+from datetime import datetime
+
+# --- IMPORTAÇÕES LOCAIS ---
 from whatsapp_api import send_whatsapp_message
 from nlp_processor import process_message_with_ai, AgendaAction
 from database import (
@@ -13,67 +18,69 @@ from database import (
     get_compromissos_do_dia,
     update_compromisso,
     delete_compromisso,
-    get_compromisso_por_id
+    get_compromisso_por_id,
 )
 from google_calendar_service import (
     create_google_event,
     update_google_event,
     delete_google_event,
-    # --- NOVAS FUNÇÕES NECESSÁRIAS ---
     google_auth_flow_start,
-    google_auth_flow_callback 
+    google_auth_flow_callback,
 )
-import traceback 
 
 # Inicializa a aplicação FastAPI
 app = FastAPI()
 
-# ID Fixo para o token na base de dados, já que é um bot de uso único.
-MAIN_USER_ID = "main_user" 
+# ID fixo do usuário principal
+MAIN_USER_ID = "main_user"
 
-# 🔒 TOKEN DE VERIFICAÇÃO DO META
-# Mude este valor para uma string secreta e insira EXATAMENTE a mesma string 
-# no campo "Verify Token" no painel de configuração do webhook do Meta.
-VERIFY_TOKEN = "seu_token_secreto_e_forte_aqui_12345" 
+# Token de verificação do Meta (ideal usar variável de ambiente em produção)
+VERIFY_TOKEN = "seu_token_secreto_e_forte_aqui_12345"
 
 
-# --- FUNÇÃO DE PROCESSAMENTO EM SEGUNDO PLANO ---
-def process_message_background(data: dict, db: Session):
+# ==================================
+# PROCESSAMENTO EM SEGUNDO PLANO
+# ==================================
+
+def process_message_background(data: dict, db: Session) -> None:
     """
-    Função que processa a lógica de negócios real (IA, DB, Google Calendar, Resposta do WhatsApp).
-    Executada em background para garantir resposta imediata ao Meta.
+    Processa a lógica pesada (IA, DB, Google Calendar, WhatsApp)
+    em background para responder rapidamente ao Meta.
     """
     try:
-        print(f"LOG PAYLOAD (Background): {json.dumps(data)}") 
+        print(f"LOG PAYLOAD (Background): {json.dumps(data)}", flush=True)
 
-        # Verifica se é um evento de mensagem (formato Meta)
-        if not (data.get('entry') and 
-                data['entry'][0].get('changes') and 
-                data['entry'][0]['changes'][0].get('value') and 
-                data['entry'][0]['changes'][0]['value'].get('messages')):
-            
-            print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento.")
-            return 
+        # Verifica se é uma mensagem de usuário
+        if not (
+            data.get("entry")
+            and data["entry"][0].get("changes")
+            and data["entry"][0]["changes"][0].get("value")
+            and data["entry"][0]["changes"][0]["value"].get("messages")
+        ):
+            print(
+                "LOG (Background): Payload não contém mensagem de usuário.",
+                flush=True,
+            )
+            return
 
-        # Extração de dados da mensagem
-        message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
-        message_text = message_data['text']['body']
-        from_number = message_data['from']
+        message_data = data["entry"][0]["changes"][0]["value"]["messages"][0]
+        message_text = message_data["text"]["body"]
+        from_number = message_data["from"]
 
-        # Processamento de IA
         ai_result: AgendaAction = process_message_with_ai(message_text)
-
-        # Lógica de Ação
         response_message = ""
 
-        # Verifique se o token do Google Calendar está disponível
         token_record = get_token(db, user_id=MAIN_USER_ID)
         google_token = json.loads(token_record.token_json) if token_record else None
 
-        # Ações para criar, reagendar, cancelar e consultar compromissos
+        # ------------------------------
+        # AGENDAR
+        # ------------------------------
         if ai_result.action == "agendar":
             if not ai_result.data_hora:
-                response_message = "Não consegui identificar a data e hora. Por favor, especifique melhor."
+                response_message = (
+                    "Não consegui identificar a data e hora. Especifique melhor."
+                )
             else:
                 compromisso = create_compromisso(
                     db,
@@ -81,190 +88,226 @@ def process_message_background(data: dict, db: Session):
                     data_hora=ai_result.data_hora,
                     assunto=ai_result.assunto,
                     duracao=ai_result.duracao,
-                    recorrencia=ai_result.recorrencia
+                    recorrencia=ai_result.recorrencia,
                 )
-                response_message = f"Compromisso agendado com sucesso! ID Local: {compromisso.id}. Título: {compromisso.titulo} em {compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                
+
+                response_message = (
+                    f"Compromisso agendado! ID {compromisso.id}. "
+                    f"{compromisso.titulo} em "
+                    f"{compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}"
+                )
+
                 if google_token:
                     event_id = create_google_event(google_token, compromisso)
                     if event_id:
-                        update_compromisso(db, compromisso.id, {"google_event_id": event_id})
-                        response_message += f" Sincronizado com o Google Calendar."
+                        update_compromisso(
+                            db,
+                            compromisso.id,
+                            {"google_event_id": event_id},
+                        )
+                        response_message += " (Google Calendar OK)"
                 else:
-                    response_message += f" \n\n⚠️ **Atenção:** O Google Calendar não está sincronizado. Acesse a rota /auth/google/start para autorizar."
+                    response_message += (
+                        "\n⚠ Google Calendar não autorizado. "
+                        "Acesse /auth/google/start"
+                    )
 
-
+        # ------------------------------
+        # REAGENDAR
+        # ------------------------------
         elif ai_result.action == "reagendar":
             if not ai_result.id_compromisso or not ai_result.data_hora:
-                response_message = "Para reagendar, preciso do ID do compromisso e da nova data/hora."
+                response_message = "Informe o ID e a nova data/hora."
             else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
+                compromisso = get_compromisso_por_id(
+                    db, ai_result.id_compromisso
+                )
                 if compromisso:
-                    update_compromisso(db, compromisso.id, {"data_hora": ai_result.data_hora})
-                    response_message = f"Compromisso ID {compromisso.id} reagendado para {ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                    
+                    update_compromisso(
+                        db,
+                        compromisso.id,
+                        {"data_hora": ai_result.data_hora},
+                    )
+                    response_message = (
+                        f"Compromisso {compromisso.id} reagendado para "
+                        f"{ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}"
+                    )
+
                     if google_token and compromisso.google_event_id:
                         update_google_event(google_token, compromisso)
-                        response_message += " Sincronizado com o Google Calendar."
+                        response_message += " (Google Calendar OK)"
                 else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
+                    response_message = "Compromisso não encontrado."
 
+        # ------------------------------
+        # CANCELAR
+        # ------------------------------
         elif ai_result.action == "cancelar":
             if not ai_result.id_compromisso:
-                response_message = "Para cancelar, preciso do ID do compromisso."
+                response_message = "Informe o ID do compromisso."
             else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
+                compromisso = get_compromisso_por_id(
+                    db, ai_result.id_compromisso
+                )
                 if compromisso:
                     delete_compromisso(db, compromisso.id)
-                    response_message = f"Compromisso ID {compromisso.id} cancelado com sucesso."
-                    
-                    if google_token and compromisso.google_event_id:
-                        delete_google_event(google_token, compromisso.google_event_id)
-                        response_message += " Sincronizado com o Google Calendar."
-                else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
+                    response_message = (
+                        f"Compromisso {compromisso.id} cancelado."
+                    )
 
+                    if google_token and compromisso.google_event_id:
+                        delete_google_event(
+                            google_token, compromisso.google_event_id
+                        )
+                        response_message += " (Google Calendar OK)"
+                else:
+                    response_message = "Compromisso não encontrado."
+
+        # ------------------------------
+        # CONSULTAR
+        # ------------------------------
         elif ai_result.action == "consultar":
-            data_consulta = ai_result.data_hora.date() if ai_result.data_hora else datetime.now().date()
-            compromissos = get_compromissos_do_dia(db, datetime.combine(data_consulta, datetime.min.time()))
-            
+            data_consulta = (
+                ai_result.data_hora.date()
+                if ai_result.data_hora
+                else datetime.now().date()
+            )
+
+            compromissos = get_compromissos_do_dia(
+                db, datetime.combine(data_consulta, datetime.min.time())
+            )
+
             if compromissos:
-                lista = "\n".join([f"ID {c.id}: {c.titulo} ({c.assunto}) às {c.data_hora.strftime('%H:%M')}" for c in compromissos])
-                response_message = f"Compromissos para {data_consulta.strftime('%d/%m/%Y')}:\n{lista}"
+                lista = "\n".join(
+                    f"ID {c.id}: {c.titulo} ({c.assunto}) às "
+                    f"{c.data_hora.strftime('%H:%M')}"
+                    for c in compromissos
+                )
+                response_message = (
+                    f"Compromissos para {data_consulta.strftime('%d/%m/%Y')}:\n"
+                    f"{lista}"
+                )
             else:
-                response_message = f"Nenhum compromisso encontrado para {data_consulta.strftime('%d/%m/%Y')}."
+                response_message = (
+                    f"Nenhum compromisso para {data_consulta.strftime('%d/%m/%Y')}"
+                )
 
         else:
-            response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
+            response_message = (
+                "Não entendi. Ex.: 'Agendar reunião amanhã às 10h'."
+            )
 
-        # Envia a resposta de volta via WhatsApp
         send_whatsapp_message(from_number, response_message)
 
     except Exception as e:
-        # Tenta enviar a mensagem de erro, se o from_number estiver disponível
         try:
-            # Tenta extrair o número de telefone em caso de erro
-            from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
-        except:
-            pass # Se não conseguir extrair o número, ignora.
+            from_number = (
+                data["entry"][0]["changes"][0]["value"]["messages"][0][
+                    "from"
+                ]
+            )
+            send_whatsapp_message(
+                from_number, "Ocorreu um erro interno ao processar sua solicitação."
+            )
+        except Exception:
+            pass
 
-        error_detail = f"Erro no processamento da mensagem (Background): {e}\n{traceback.format_exc()}"
-        print(error_detail)
+        print(
+            f"Erro no processamento (Background): {e}\n"
+            f"{traceback.format_exc()}",
+            flush=True,
+        )
 
 
-# --- ROTAS DE AUTENTICAÇÃO DO GOOGLE CALENDAR ---
+# ==================================
+# ROTAS GOOGLE CALENDAR
+# ==================================
 
-## 🔑 Rota 1: Iniciar o Fluxo OAuth
 @app.get("/auth/google/start")
 async def google_auth_start():
-    """
-    Inicia o fluxo de autorização do Google.
-    Gera a URL de consentimento e redireciona o usuário para o Google.
-    """
     try:
         auth_url = google_auth_flow_start()
-        # Redireciona o navegador do usuário para a página de login do Google
         return RedirectResponse(auth_url)
     except Exception as e:
-        print(f"Erro ao iniciar o fluxo de autenticação: {e}")
+        print(f"Erro ao iniciar Google Auth: {e}", flush=True)
         return HTMLResponse(
-            content=f"<h1>Erro ao iniciar o Google Auth</h1><p>Detalhe: {e}</p>",
-            status_code=500
+            content=f"<h1>Erro no Google Auth</h1><p>{e}</p>", status_code=500
         )
 
-## 🔄 Rota 2: Callback do Google (A URL que o Google usa para retornar)
+
 @app.get("/auth/google/callback")
-async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
-    """
-    Recebe o código de autorização do Google, troca por um token e salva no DB.
-    """
+async def google_auth_callback(
+    request: Request, db: Session = Depends(get_db)
+):
     try:
-        # Pega a URL completa com os parâmetros que o Google adicionou (incluindo o 'code')
-        full_url = str(request.url) 
-        
-        # O google_auth_flow_callback deve lidar com a troca do código pelo token
+        full_url = str(request.url)
         token_info = google_auth_flow_callback(full_url)
-        
-        # Salva o token no banco de dados
         save_token(db, user_id=MAIN_USER_ID, token_json=json.dumps(token_info))
-        
-        # Retorna uma mensagem de sucesso para o usuário
+
         return HTMLResponse(
-            content="<h1>✅ Autenticação Concluída com Sucesso!</h1><p>O Google Calendar está agora sincronizado com o seu bot do WhatsApp. Você pode fechar esta página.</p>",
-            status_code=200
+            content=(
+                "<h1>✅ Autenticação Concluída!</h1>"
+                "<p>Google Calendar sincronizado.</p>"
+            ),
+            status_code=200,
         )
-        
     except Exception as e:
-        print(f"Erro no callback do Google: {e}")
+        print(f"Erro no callback do Google: {e}", flush=True)
         return HTMLResponse(
-            content=f"<h1>❌ Erro na Autenticação</h1><p>Ocorreu um problema ao salvar o token. Detalhe: {e}</p>",
-            status_code=500
+            content=f"<h1>❌ Erro na Autenticação</h1><p>{e}</p>",
+            status_code=500,
         )
 
-# --- ROTAS DA APLICAÇÃO ---
 
-# Rota para verificar se o servidor está funcionando
+# ==================================
+# ROTAS DA APLICAÇÃO
+# ==================================
+
 @app.get("/")
 def read_root():
     return {"message": "Servidor está funcionando!"}
 
-# Rota GET: Necessária para a verificação do Webhook do Meta
+
 @app.get("/webhook/whatsapp")
 def verify_webhook(request: Request):
-    """
-    Lida com a requisição GET de verificação de URL do Meta.
-    """
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
 
-    # Verifica se os parâmetros existem
     if mode and token:
-        # Verifica se o modo é 'subscribe' e se o token bate com o seu token secreto
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            # Sucesso: Retorna o 'challenge' para o Meta
-            print("--- VERIFICAÇÃO DE WEBHOOK (GET) BEM-SUCEDIDA ---")
-            return HTMLResponse(content=challenge, status_code=200)
-        else:
-            # Falha: Token ou modo incorreto
-            print("--- FALHA NA VERIFICAÇÃO (GET): Token ou modo incorreto ---")
-            raise HTTPException(status_code=403, detail="Token de verificação incorreto")
-            
-    # Caso não haja parâmetros de webhook
-    print("--- REQUISIÇÃO GET SEM PARÂMETROS DE VERIFICAÇÃO ---")
-    raise HTTPException(status_code=400, detail="Parâmetros ausentes.")
+            print(
+                f"Webhook verificado. Challenge: {challenge}", flush=True
+            )
+            return PlainTextResponse(
+                content=str(challenge), status_code=200
+            )
+        raise HTTPException(
+            status_code=403, detail="Token de verificação incorreto"
+        )
+
+    raise HTTPException(
+        status_code=400,
+        detail="Parâmetros ausentes (rota usada pelo Meta).",
+    )
 
 
-# Rota POST: Recebe a mensagem do WhatsApp e a processa em background
 @app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(
-    request: Request, 
+    request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """
-    Recebe o payload do Meta. Responde imediatamente para evitar timeout e 
-    agenda o processamento real (IA, DB, Resposta) em uma tarefa de background.
-    """
-    print("--- REQUISIÇÃO POST RECEBIDA E ENVIANDO RESPOSTA IMEDIATA (200 OK) ---")
-    
+    print("POST recebido em /webhook/whatsapp", flush=True)
     try:
-        # 1. Tenta extrair o corpo JSON
         data = await request.json()
-
-        # 2. Agenda a função de processamento real para rodar em segundo plano
-        # Note: A sessão do DB é passada. Garantir que o get_db lida com a thread safety
-        # em BackgroundTasks é importante, mas para o FastAPI padrão, isso é aceitável.
         background_tasks.add_task(process_message_background, data, db)
-        
-        # 3. Retorna 200 OK IMEDIATAMENTE. O Meta verá isso como sucesso instantâneo.
-        return {"status": "ok", "message": "Evento agendado para processamento."}
-
+        return {"status": "ok", "message": "Evento agendado."}
     except Exception as e:
-        # Se falhar ao ler o JSON
-        error_detail = f"Erro FATAL ao receber JSON (Não conseguiu iniciar background task): {e}\n{traceback.format_exc()}"
-        print(error_detail)
-        
-        # Retorna 500 para indicar que houve falha no recebimento
-        raise HTTPException(status_code=500, detail="Erro ao receber ou analisar o payload do Webhook.")
+        print(
+            f"Erro fatal no POST: {e}\n{traceback.format_exc()}",
+            flush=True,
+        )
+        raise HTTPException(
+            status_code=500, detail="Erro ao processar payload"
+        )
