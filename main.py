@@ -1,15 +1,14 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse, Response
 from sqlalchemy.orm import Session
 import json
 import os
 import traceback
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta
 
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
-# Certifique-se de que os arquivos existem na mesma pasta
-from whatsapp_api import send_whatsapp_message
-from nlp_processor import process_message_with_ai, AgendaAction
+# from whatsapp_api import send_whatsapp_message
+# from nlp_processor import process_message_with_ai, AgendaAction
 from database import (
     get_db,
     get_token,
@@ -28,6 +27,27 @@ from google_calendar_service import (
     google_auth_flow_callback
 )
 
+# --- MOCK DA IA PARA TESTE (Contorna o erro 429 da OpenAI) ---
+class MockAgendaAction:
+    """Simula a saída da IA para testar o fluxo completo."""
+    def __init__(self):
+        # Hardcoded data para uma ação de 'agendar' bem-sucedida
+        self.action = "agendar"
+        self.titulo = "Reunião de Teste (Mock IA)"
+        # Define a data/hora para daqui a 1 hora
+        self.data_hora = datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        self.assunto = "Teste de Sincronização"
+        self.duracao = 60 # minutos
+        self.recorrencia = None
+        self.id_compromisso = None
+
+def process_message_with_ai(message_text):
+    """Função mock que substitui a chamada real à OpenAI."""
+    print("LOG (Mock IA): Retornando ação de agendamento de teste para contornar erro 429.", flush=True)
+    return MockAgendaAction()
+
+# --- FIM DO MOCK ---
+
 # Inicializa a aplicação FastAPI
 app = FastAPI()
 
@@ -35,9 +55,8 @@ app = FastAPI()
 MAIN_USER_ID = "main_user"
 
 # 🔒 TOKEN DE VERIFICAÇÃO DO META
-# DICA: No Render, é melhor usar Variável de Ambiente (Environment Variable)
-# Mas mantive fixo aqui conforme seu código original para facilitar.
-VERIFY_TOKEN = "meu_token_real_123"
+# Usando os.getenv para o token de verificação, mas mantendo o fallback para o teste
+VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "meu_token_real_123")
 
 
 # --- FUNÇÃO DE PROCESSAMENTO EM SEGUNDO PLANO ---
@@ -50,21 +69,21 @@ def process_message_background(data: dict, db: Session):
         print(f"LOG PAYLOAD (Background): {json.dumps(data)}", flush=True)
 
         # Verifica se é um evento de mensagem (formato Meta)
-        if not (data.get('entry') and 
-                data['entry'][0].get('changes') and 
-                data['entry'][0]['changes'][0].get('value') and 
+        if not (data.get('entry') and
+                data['entry'][0].get('changes') and
+                data['entry'][0]['changes'][0].get('value') and
                 data['entry'][0]['changes'][0]['value'].get('messages')):
-            
+
             print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento.", flush=True)
-            return 
+            return
 
         # Extração de dados da mensagem
         message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
         message_text = message_data['text']['body']
         from_number = message_data['from']
 
-        # Processamento de IA
-        ai_result: AgendaAction = process_message_with_ai(message_text)
+        # Processamento de IA (AGORA USANDO O MOCK)
+        ai_result = process_message_with_ai(message_text)
 
         # Lógica de Ação
         response_message = ""
@@ -87,7 +106,7 @@ def process_message_background(data: dict, db: Session):
                     recorrencia=ai_result.recorrencia
                 )
                 response_message = f"Compromisso agendado com sucesso! ID Local: {compromisso.id}. Título: {compromisso.titulo} em {compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                
+
                 if google_token:
                     event_id = create_google_event(google_token, compromisso)
                     if event_id:
@@ -104,7 +123,7 @@ def process_message_background(data: dict, db: Session):
                 if compromisso:
                     update_compromisso(db, compromisso.id, {"data_hora": ai_result.data_hora})
                     response_message = f"Compromisso ID {compromisso.id} reagendado para {ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}."
-                    
+
                     if google_token and compromisso.google_event_id:
                         update_google_event(google_token, compromisso)
                         response_message += " Sincronizado com o Google Calendar."
@@ -119,7 +138,7 @@ def process_message_background(data: dict, db: Session):
                 if compromisso:
                     delete_compromisso(db, compromisso.id)
                     response_message = f"Compromisso ID {compromisso.id} cancelado com sucesso."
-                    
+
                     if google_token and compromisso.google_event_id:
                         delete_google_event(google_token, compromisso.google_event_id)
                         response_message += " Sincronizado com o Google Calendar."
@@ -129,7 +148,7 @@ def process_message_background(data: dict, db: Session):
         elif ai_result.action == "consultar":
             data_consulta = ai_result.data_hora.date() if ai_result.data_hora else datetime.now().date()
             compromissos = get_compromissos_do_dia(db, datetime.combine(data_consulta, datetime.min.time()))
-            
+
             if compromissos:
                 lista = "\n".join([f"ID {c.id}: {c.titulo} ({c.assunto}) às {c.data_hora.strftime('%H:%M')}" for c in compromissos])
                 response_message = f"Compromissos para {data_consulta.strftime('%d/%m/%Y')}:\n{lista}"
@@ -140,14 +159,20 @@ def process_message_background(data: dict, db: Session):
             response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
 
         # Envia a resposta de volta via WhatsApp
-        send_whatsapp_message(from_number, response_message)
+        # NOTE: A função send_whatsapp_message precisa ser importada ou mockada
+        # Para este teste, assumimos que ela está disponível.
+        # Se ela falhar, o erro 401 (Authenticate) aparecerá.
+        # send_whatsapp_message(from_number, response_message)
+        print(f"LOG (WhatsApp Send): Tentando enviar mensagem para {from_number}: {response_message}", flush=True)
+
 
     except Exception as e:
         # Tenta enviar a mensagem de erro, se o from_number estiver disponível
         try:
             # Tenta extrair o número de telefone em caso de erro
             from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
+            # send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
+            print(f"LOG (WhatsApp Send Error): Tentando enviar erro para {from_number}", flush=True)
         except:
             pass # Se não conseguir extrair o número, ignora.
 
@@ -172,16 +197,16 @@ async def google_auth_start():
 @app.get("/auth/google/callback")
 async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     try:
-        full_url = str(request.url) 
+        full_url = str(request.url)
         token_info = google_auth_flow_callback(full_url)
-        
+
         save_token(db, user_id=MAIN_USER_ID, token_json=json.dumps(token_info))
-        
+
         return HTMLResponse(
             content="<h1>✅ Autenticação Concluída com Sucesso!</h1><p>O Google Calendar está agora sincronizado com o seu bot do WhatsApp. Você pode fechar esta página.</p>",
             status_code=200
         )
-        
+
     except Exception as e:
         print(f"Erro no callback do Google: {e}", flush=True)
         return HTMLResponse(
@@ -219,7 +244,7 @@ def verify_webhook(request: Request):
         else:
             print(f"--- FALHA: Token recebido ({token}) diferente do esperado ou modo errado ---", flush=True)
             raise HTTPException(status_code=403, detail="Token de verificação incorreto")
-            
+
     # Caso acesse pelo navegador sem parâmetros
     print("--- AVISO: Acesso GET sem parâmetros (Normal se for acesso via navegador) ---", flush=True)
     raise HTTPException(status_code=400, detail="Parâmetros ausentes. Esta rota é para uso do Meta/WhatsApp.")
@@ -228,7 +253,7 @@ def verify_webhook(request: Request):
 # --- ROTA DE RECEBIMENTO DE MENSAGENS (POST) ---
 @app.post("/webhook/whatsapp")
 async def handle_whatsapp_message(
-    request: Request, 
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
@@ -236,13 +261,13 @@ async def handle_whatsapp_message(
     Recebe o payload do Meta e responde imediatamente.
     """
     print("--- POST RECEBIDO: Iniciando processamento ---", flush=True)
-    
+
     try:
         data = await request.json()
 
         # Agenda a função pesada para background
         background_tasks.add_task(process_message_background, data, db)
-        
+
         return {"status": "ok", "message": "Evento agendado."}
 
     except Exception as e:
