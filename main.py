@@ -8,24 +8,24 @@ from datetime import datetime, time, date, timedelta
 
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
 # from whatsapp_api import send_whatsapp_message
-# from nlp_processor import process_message_with_ai, AgendaAction
-from database import (
-    get_db,
-    get_token,
-    save_token,
-    create_compromisso,
-    get_compromissos_do_dia,
-    update_compromisso,
-    delete_compromisso,
-    get_compromisso_por_id
-)
-from google_calendar_service import (
-    create_google_event,
-    update_google_event,
-    delete_google_event,
-    google_auth_flow_start,
-    google_auth_flow_callback
-)
+# from nlp_processor import process_message_with_ai
+import database # Importa o módulo inteiro para evitar circular import
+import google_calendar_service # Importa o módulo inteiro para evitar circular import
+
+# Desempacotando as funções do database para manter a compatibilidade com o código original
+get_db = database.get_db
+get_token = database.get_token
+save_token = database.save_token
+create_compromisso = database.create_compromisso
+get_compromissos_do_dia = database.get_compromissos_do_dia
+update_compromisso = database.update_compromisso
+delete_compromisso = database.delete_compromisso
+get_compromisso_por_id = database.get_compromisso_por_id
+
+# Desempacotando as funções de autenticação do google_calendar_service para manter a compatibilidade com o código original
+google_auth_flow_start = google_calendar_service.google_auth_flow_start
+google_auth_flow_callback = google_calendar_service.google_auth_flow_callback
+
 
 # --- MOCK DA IA PARA TESTE (Contorna o erro 429 da OpenAI) ---
 class MockAgendaAction:
@@ -90,7 +90,10 @@ def process_message_background(data: dict, db: Session):
 
         # Verifique se o token do Google Calendar está disponível
         token_record = get_token(db, user_id=MAIN_USER_ID)
-        google_token = json.loads(token_record.token_json) if token_record else None
+        
+        # CORREÇÃO: Passar a string JSON bruta para o google_calendar_service
+        # O json.loads() foi removido daqui para evitar o erro de desserialização
+        google_token_json = token_record.token_json if token_record else None
 
         # Ações para criar, reagendar, cancelar e consultar compromissos
         if ai_result.action == "agendar":
@@ -107,8 +110,9 @@ def process_message_background(data: dict, db: Session):
                 )
                 response_message = f"Compromisso agendado com sucesso! ID Local: {compromisso.id}. Título: {compromisso.titulo} em {compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}."
 
-                if google_token:
-                    event_id = create_google_event(google_token, compromisso)
+                if google_token_json:
+                    # Chamada corrigida com o prefixo do módulo
+                    event_id = google_calendar_service.create_google_event(google_token_json, compromisso)
                     if event_id:
                         update_compromisso(db, compromisso.id, {"google_event_id": event_id})
                         response_message += f" Sincronizado com o Google Calendar."
@@ -124,8 +128,9 @@ def process_message_background(data: dict, db: Session):
                     update_compromisso(db, compromisso.id, {"data_hora": ai_result.data_hora})
                     response_message = f"Compromisso ID {compromisso.id} reagendado para {ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}."
 
-                    if google_token and compromisso.google_event_id:
-                        update_google_event(google_token, compromisso)
+                    if google_token_json and compromisso.google_event_id:
+                        # Chamada corrigida com o prefixo do módulo
+                        google_calendar_service.update_google_event(google_token_json, compromisso)
                         response_message += " Sincronizado com o Google Calendar."
                 else:
                     response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
@@ -139,8 +144,9 @@ def process_message_background(data: dict, db: Session):
                     delete_compromisso(db, compromisso.id)
                     response_message = f"Compromisso ID {compromisso.id} cancelado com sucesso."
 
-                    if google_token and compromisso.google_event_id:
-                        delete_google_event(google_token, compromisso.google_event_id)
+                    if google_token_json and compromisso.google_event_id:
+                        # Chamada corrigida com o prefixo do módulo
+                        google_calendar_service.delete_google_event(google_token_json, compromisso.google_event_id)
                         response_message += " Sincronizado com o Google Calendar."
                 else:
                     response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
@@ -200,7 +206,8 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
         full_url = str(request.url)
         token_info = google_auth_flow_callback(full_url)
 
-        save_token(db, user_id=MAIN_USER_ID, token_json=json.dumps(token_info))
+        # O token_info já é a string JSON, não precisa de json.dumps()
+        save_token(db, user_id=MAIN_USER_ID, token_json=token_info)
 
         return HTMLResponse(
             content="<h1>✅ Autenticação Concluída com Sucesso!</h1><p>O Google Calendar está agora sincronizado com o seu bot do WhatsApp. Você pode fechar esta página.</p>",
