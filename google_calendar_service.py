@@ -35,7 +35,7 @@ def load_client_config():
     except Exception as e:
         raise ValueError(f"Erro ao decodificar GOOGLE_CREDENTIALS_BASE64: {e}")
     
-    return {
+    client_config = {
         "web": {
             "client_id": credentials_info["web"]["client_id"],
             "client_secret": credentials_info["web"]["client_secret"],
@@ -44,6 +44,13 @@ def load_client_config():
             "redirect_uris": [REDIRECT_URI]
         }
     }
+    
+    # --- NOVO LOG DE DEBUG ---
+    print(f"LOG (Debug Auth): Client ID: {client_config['web']['client_id']}", flush=True)
+    print(f"LOG (Debug Auth): Redirect URI: {REDIRECT_URI}", flush=True)
+    # --- FIM DO NOVO LOG ---
+    
+    return client_config
 
 # --- 1. Funções de Autenticação ---
 
