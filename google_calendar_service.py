@@ -66,15 +66,16 @@ def start_auth_flow():
         access_type='offline',
         include_granted_scopes='true'
     )
-    return auth_url
+    return auth_url, state # NOVO: Retornando o state
 
-def handle_auth_callback(code: str) -> str:
+def handle_auth_callback(code: str, state: str) -> str: # MUDANÇA AQUI
     """Troca o código pelo token."""
     client_config = load_client_config()
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
+        redirect_uri=REDIRECT_URI,
+        state=state # NOVO: Passando o state
     )
     flow.fetch_token(code=code)
     return flow.credentials.to_json()
