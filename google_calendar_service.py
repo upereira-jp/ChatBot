@@ -45,10 +45,10 @@ def load_client_config():
         }
     }
     
-    # --- NOVO LOG DE DEBUG ---
+    # --- LOG DE DEBUG ---
     print(f"LOG (Debug Auth): Client ID: {client_config['web']['client_id']}", flush=True)
     print(f"LOG (Debug Auth): Redirect URI: {REDIRECT_URI}", flush=True)
-    # --- FIM DO NOVO LOG ---
+    # --- FIM DO LOG ---
     
     return client_config
 
@@ -64,20 +64,20 @@ def start_auth_flow():
     )
     auth_url, state = flow.authorization_url(
         access_type='offline',
-        include_granted_scopes='true'
+        include_granted_scopes='true',
+        prompt='consent' # NOVO: Força o Google a enviar o refresh_token
     )
-    return auth_url, state # NOVO: Retornando o state
+    return auth_url, state 
 
-def handle_auth_callback(code: str, state: str) -> str: # MUDANÇA AQUI
+def handle_auth_callback(full_url: str) -> str:
     """Troca o código pelo token."""
     client_config = load_client_config()
     flow = Flow.from_client_config(
         client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-        state=state # NOVO: Passando o state
+        redirect_uri=REDIRECT_URI
     )
-    flow.fetch_token(code=code)
+    flow.fetch_token(authorization_response=full_url)
     return flow.credentials.to_json()
 
 # --- ALIASES DE COMPATIBILIDADE (Para corrigir o erro de importação) ---
@@ -96,10 +96,6 @@ def get_calendar_service(token_json: str):
         # CORREÇÃO: O token_json vem do DB como string JSON. 
         # Ele precisa ser desserializado AQUI.
         creds_dict = json.loads(token_json)
-        
-        # O erro 'the JSON object must be str, bytes or bytearray, not dict'
-        # sugere que o json.loads estava sendo chamado novamente em algum lugar.
-        # Vamos garantir que ele seja desserializado apenas aqui.
         
         creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
         
