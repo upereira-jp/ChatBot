@@ -125,10 +125,16 @@ def create_google_event(token_json: str, compromisso):
 
         event_body = {
             'summary': compromisso.titulo,
-            'description': f"{compromisso.assunto}\n\nAgendado via Bot.",
-            'start': {'dateTime': start_time.isoformat(), 'timeZone': 'America/Sao_Paulo'},
-            'end': {'dateTime': end_time.isoformat(), 'timeZone': 'America/Sao_Paulo'},
-        }
+            'location': 'Online',
+            'description': compromisso.assunto,
+            'start': {
+                'dateTime': start_time.isoformat(),
+                'timeZone': 'America/Sao_Paulo', # Adicionando o fuso horário
+            },
+            'end': {
+                'dateTime': end_time.isoformat(),
+                'timeZone': 'America/Sao_Paulo', # Adicionando o fuso horário
+            }
 
         event = service.events().insert(calendarId='primary', body=event_body).execute()
         return event.get('id')
