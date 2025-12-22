@@ -1,26 +1,46 @@
-from twilio.rest import Client
 import os
+import requests
+import json
 
-# Obtém as credenciais do Twilio através das variáveis de ambiente
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.environ.get("TWILIO_PHONE_NUMBER")
+# Variáveis de ambiente necessárias
+WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 
-# Certifique-se de que as variáveis de ambiente estão configuradas corretamente
-if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER]):
-    raise ValueError("Certifique-se de que todas as variáveis de ambiente do Twilio estão configuradas.")
+def send_whatsapp_message(to_number: str, message_text: str):
+    """
+    Envia uma mensagem de texto simples via WhatsApp Business API.
+    """
+    if not WHATSAPP_ACCESS_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        print("ERRO: Variáveis de ambiente WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configuradas.")
+        return
 
-client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-def send_whatsapp_message(to: str, message: str):
-    """Envia uma mensagem via WhatsApp usando o Twilio."""
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # O número de destino deve ser formatado corretamente (ex: 5511999999999 )
+    # O Meta espera o número com o código do país, mas sem o sinal de '+'
+    # O número que vem do webhook já está no formato correto (ex: 5511999999999)
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,
+        "type": "text",
+        "text": {
+            "body": message_text
+        }
+    }
+    
     try:
-        # Envia a mensagem para o número 'to' com o conteúdo 'message'
-        message = client.messages.create(
-            body=message,
-            from_='whatsapp:' + TWILIO_PHONE_NUMBER,  # O número do Twilio
-            to='whatsapp:' + to  # O número de destino do WhatsApp
-        )
-        print(f"Mensagem enviada para {to}: {message.sid}")
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status() # Levanta exceção para códigos de status HTTP ruins
+        print(f"SUCESSO: Mensagem enviada para {to_number}. Status: {response.status_code}")
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        print(f"ERRO HTTP ao enviar mensagem: {e}")
+        print(f"Resposta do Meta: {response.text}")
     except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
+        print(f"ERRO ao enviar mensagem: {e}")
