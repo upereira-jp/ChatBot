@@ -9,7 +9,7 @@ from pytz import timezone # NOVO: Para lidar com fuso horário
 
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
 from whatsapp_api import send_whatsapp_message # DESCOMENTADO
-# from nlp_processor import process_message_with_ai
+# from nlp_processor import process_message_with_ai # Removido
 import database 
 import google_calendar_service 
 
@@ -28,31 +28,49 @@ google_auth_flow_start = google_calendar_service.google_auth_flow_start
 google_auth_flow_callback = google_calendar_service.google_auth_flow_callback
 
 
-# --- MOCK DA IA PARA TESTE (Contorna o erro 429 da OpenAI) ---
-class MockAgendaAction:
-    """Simula a saída da IA para testar o fluxo completo."""
-    def __init__(self):
-        # Hardcoded data para uma ação de 'agendar' bem-sucedida
-        self.action = "agendar"
-        self.titulo = "Reunião de Teste (Mock IA)"
-        
-        # --- CORREÇÃO DE FUSO HORÁRIO ---
-        tz = timezone('America/Sao_Paulo')
-        now_tz = datetime.now(tz).replace(minute=0, second=0, microsecond=0)
-        self.data_hora = now_tz + timedelta(hours=1)
-        # --- FIM DA CORREÇÃO ---
-        
-        self.assunto = "Teste de Sincronização"
-        self.duracao = 60 # minutos
-        self.recorrencia = None
-        self.id_compromisso = None
+# --- CLASSE DE AÇÃO (Substitui o Mock) ---
+class AgendaAction:
+    """Estrutura de dados para a ação de agendamento."""
+    def __init__(self, action, titulo, data_hora, assunto, duracao=60, recorrencia=None, id_compromisso=None):
+        self.action = action
+        self.titulo = titulo
+        self.data_hora = data_hora
+        self.assunto = assunto
+        self.duracao = duracao
+        self.recorrencia = recorrencia
+        self.id_compromisso = id_compromisso
 
-def process_message_with_ai(message_text):
-    """Função mock que substitui a chamada real à OpenAI."""
-    print("LOG (Mock IA): Retornando ação de agendamento de teste para contornar erro 429.", flush=True)
-    return MockAgendaAction()
+# --- PARSER SIMPLES (Substitui o Mock da IA) ---
+def simple_nlp_parser(message_text: str) -> AgendaAction:
+    """
+    Parser simples para extrair título e definir a data/hora atual no fuso horário correto.
+    
+    NOTA: Para extrair datas e horas complexas (ex: "amanhã às 15h"),
+    é necessário integrar uma biblioteca NLP mais robusta (ex: dateutil, spaCy)
+    ou a API da OpenAI.
+    """
+    # 1. Definir o fuso horário correto
+    tz = timezone('America/Sao_Paulo')
+    
+    # 2. Definir a data/hora atual no fuso horário de São Paulo
+    # Usamos now(tz) para garantir que o agendamento seja no fuso horário correto
+    data_hora_agora = datetime.now(tz)
+    
+    # 3. Extrair o título (usamos a mensagem inteira como título)
+    titulo = message_text.strip()
+    
+    # 4. Criar a ação de agendamento
+    return AgendaAction(
+        action="agendar",
+        titulo=titulo,
+        data_hora=data_hora_agora,
+        assunto=f"Agendado via WhatsApp: {titulo}",
+        duracao=60, # Default de 60 minutos
+        recorrencia=None,
+        id_compromisso=None
+    )
 
-# --- FIM DO MOCK ---
+# --- FIM DO PARSER SIMPLES ---
 
 # Inicializa a aplicação FastAPI
 app = FastAPI()
@@ -88,8 +106,8 @@ def process_message_background(data: dict, db: Session):
         message_text = message_data['text']['body']
         from_number = message_data['from']
 
-        # Processamento de IA (AGORA USANDO O MOCK)
-        ai_result = process_message_with_ai(message_text)
+        # Processamento de IA (AGORA USANDO O PARSER SIMPLES)
+        ai_result = simple_nlp_parser(message_text) # MUDANÇA AQUI
 
         # Lógica de Ação
         response_message = ""
@@ -105,6 +123,7 @@ def process_message_background(data: dict, db: Session):
             if not ai_result.data_hora:
                 response_message = "Não consegui identificar a data e hora. Por favor, especifique melhor."
             else:
+                # O objeto datetime.now(tz) já é timezone-aware
                 compromisso = create_compromisso(
                     db,
                     titulo=ai_result.titulo,
@@ -170,7 +189,7 @@ def process_message_background(data: dict, db: Session):
             response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
 
         # Envia a resposta de volta via WhatsApp
-        send_whatsapp_message(from_number, response_message) # DESCOMENTADO
+        send_whatsapp_message(from_number, response_message)
         print(f"LOG (WhatsApp Send): Tentando enviar mensagem para {from_number}: {response_message}", flush=True)
 
 
