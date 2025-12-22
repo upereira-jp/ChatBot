@@ -189,7 +189,7 @@ def process_message_background(data: dict, db: Session):
 @app.get("/auth/google/start")
 async def google_auth_start():
     try:
-        auth_url, state = google_auth_flow_start() # MUDANÇA AQUI: Recebendo o state
+        auth_url, _ = google_auth_flow_start() # CORREÇÃO: Ignora o state
         return RedirectResponse(auth_url)
     except Exception as e:
         print(f"Erro ao iniciar o fluxo de autenticação: {e}", flush=True)
@@ -199,19 +199,10 @@ async def google_auth_start():
         )
 
 @app.get("/auth/google/callback")
-async def google_auth_callback(
-    request: Request, 
-    db: Session = Depends(get_db),
-    code: str = None, # NOVO: Recebendo o code
-    state: str = None # NOVO: Recebendo o state
-):
+async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     try:
-        if not code or not state:
-            # Se o código ou estado estiverem ausentes, é um erro de requisição malformada
-            raise HTTPException(status_code=400, detail="Parâmetros de autenticação ausentes.")
-            
-        # MUDANÇA AQUI: Passando code e state em vez da URL completa
-        token_info = google_auth_flow_callback(code=code, state=state) 
+        full_url = str(request.url) # CORREÇÃO: Obtém a URL completa
+        token_info = google_auth_flow_callback(full_url) # CORREÇÃO: Passa a URL completa
 
         # O token_info já é a string JSON, não precisa de json.dumps()
         save_token(db, user_id=MAIN_USER_ID, token_json=token_info)
