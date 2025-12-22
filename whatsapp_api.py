@@ -14,6 +14,9 @@ def send_whatsapp_message(to_number: str, message_text: str):
         print("ERRO: Variáveis de ambiente WHATSAPP_ACCESS_TOKEN ou WHATSAPP_PHONE_NUMBER_ID não configuradas.")
         return
 
+    # CORREÇÃO: Limpar o número de telefone para garantir que seja apenas dígitos
+    clean_to_number = ''.join(filter(str.isdigit, to_number))
+    
     url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     
     headers = {
@@ -21,13 +24,9 @@ def send_whatsapp_message(to_number: str, message_text: str):
         "Content-Type": "application/json"
     }
     
-    # O número de destino deve ser formatado corretamente (ex: 5511999999999 )
-    # O Meta espera o número com o código do país, mas sem o sinal de '+'
-    # O número que vem do webhook já está no formato correto (ex: 5511999999999)
-    
     payload = {
         "messaging_product": "whatsapp",
-        "to": to_number,
+        "to": clean_to_number, # USANDO O NÚMERO LIMPO
         "type": "text",
         "text": {
             "body": message_text
@@ -35,9 +34,9 @@ def send_whatsapp_message(to_number: str, message_text: str):
     }
     
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
+        response = requests.post(url, headers=headers, data=json.dumps(payload ))
         response.raise_for_status() # Levanta exceção para códigos de status HTTP ruins
-        print(f"SUCESSO: Mensagem enviada para {to_number}. Status: {response.status_code}")
+        print(f"SUCESSO: Mensagem enviada para {clean_to_number}. Status: {response.status_code}")
         return response.json()
     except requests.exceptions.HTTPError as e:
         print(f"ERRO HTTP ao enviar mensagem: {e}")
