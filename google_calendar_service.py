@@ -31,10 +31,12 @@ def load_client_config():
     
     try:
         credentials_json_bytes = base64.b64decode(CREDENTIALS_BASE64)
-        credentials_info = json.loads(credentials_json_bytes.decode('utf-8'))
+        credentials_info = json.loads(credentials_json_bytes)
     except Exception as e:
         raise ValueError(f"Erro ao decodificar GOOGLE_CREDENTIALS_BASE64: {e}")
-    
+
+    # O google_auth_oauthlib.flow.Flow.from_client_config espera um dicionário
+    # com a chave 'web' ou 'installed' no topo.
     client_config = {
         "web": {
             "client_id": credentials_info["web"]["client_id"],
@@ -45,73 +47,72 @@ def load_client_config():
         }
     }
     
-    # --- LOG DE DEBUG ---
+    # Log de depuração para verificar se as credenciais estão sendo lidas
     print(f"LOG (Debug Auth): Client ID: {client_config['web']['client_id']}", flush=True)
     print(f"LOG (Debug Auth): Redirect URI: {REDIRECT_URI}", flush=True)
-    # --- FIM DO LOG ---
     
     return client_config
 
-# --- 1. Funções de Autenticação ---
-
-def start_auth_flow():
-    """Inicia o fluxo de autenticação OAuth 2.0."""
-    client_config = load_client_config()
-    flow = Flow.from_client_config(
-        client_config,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
-    auth_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent' # CORREÇÃO: Força o refresh_token
-    )
-    return auth_url, state 
-
-def handle_auth_callback(full_url: str) -> str: # CORREÇÃO: Recebe apenas a URL completa
-    """Troca o código pelo token."""
-    client_config = load_client_config()
-    flow = Flow.from_client_config(
-        client_config,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
-    # O full_url contém o code e o state
-    flow.fetch_token(authorization_response=full_url)
-    return flow.credentials.to_json()
-
-# --- ALIASES DE COMPATIBILIDADE (Para corrigir o erro de importação) ---
-# Isso garante que funcione tanto se o main.py pedir o nome novo quanto o antigo.
-google_auth_flow_start = start_auth_flow
-google_auth_flow_callback = handle_auth_callback
-
-
-# --- 2. Função para Obter o Serviço ---
-
 def get_calendar_service(token_json: str):
-    """Reconstrói as credenciais e retorna o serviço."""
+    """Cria e retorna o objeto de serviço do Google Calendar."""
     if not token_json:
         return None
+    
     try:
-        # CORREÇÃO: O token_json vem do DB como string JSON. 
-        # Ele precisa ser desserializado AQUI.
-        creds_dict = json.loads(token_json)
+        # O token_json é a string JSON salva no banco de dados.
+        # Precisamos desserializar para um dicionário para criar o objeto Credentials.
+        token_info = json.loads(token_json)
         
-        creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
+        # Cria o objeto Credentials
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
         
+        # Se o token for inválido ou expirar, tenta renovar
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-
-        return build('calendar', 'v3', credentials=creds)
+            
+        # Constrói o serviço
+        service = build('calendar', 'v3', credentials=creds)
+        return service
+        
     except Exception as e:
-        print(f"Erro ao criar serviço do Calendar: {e}")
+        print(f"Erro ao criar serviço do Calendar: {e}", flush=True)
         return None
 
-# --- 3. Funções de CRUD ---
+# --- Funções de Autenticação ---
 
-# ATENÇÃO: Os parâmetros 'compromisso' NÃO possuem tipagem explicita da classe
-# para evitar o erro de Importação Circular com o database.py.
+def google_auth_flow_start():
+    """Inicia o fluxo de autenticação OAuth2."""
+    client_config = load_client_config()
+    flow = Flow.from_client_config(
+        client_config, 
+        scopes=SCOPES, 
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # Adiciona prompt='consent' para forçar o envio do refresh_token
+    auth_url, state = flow.authorization_url(
+        access_type='offline', 
+        include_granted_scopes='true',
+        prompt='consent' # Força o consentimento para obter o refresh_token
+    )
+    return auth_url, state
+
+def google_auth_flow_callback(full_url: str) -> str:
+    """Completa o fluxo de autenticação e retorna o token JSON."""
+    client_config = load_client_config()
+    flow = Flow.from_client_config(
+        client_config, 
+        scopes=SCOPES, 
+        redirect_uri=REDIRECT_URI
+    )
+    
+    # Troca o código de autorização por um token
+    flow.fetch_token(authorization_response=full_url)
+    
+    # Retorna o token como uma string JSON
+    return flow.credentials.to_json()
+
+# --- Funções de CRUD do Calendar ---
 
 def create_google_event(token_json: str, compromisso):
     service = get_calendar_service(token_json)
@@ -123,23 +124,27 @@ def create_google_event(token_json: str, compromisso):
         duracao = getattr(compromisso, 'duracao', 60) or 60
         end_time = start_time + timedelta(minutes=duracao)
 
-       event_body = {
+        event_body = {
             'summary': compromisso.titulo,
             'location': 'Online',
             'description': compromisso.assunto,
             'start': {
                 'dateTime': start_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # ADICIONADO
+                'timeZone': 'America/Sao_Paulo', # CORREÇÃO DE FUSO HORÁRIO
             },
             'end': {
                 'dateTime': end_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # ADICIONADO
-            },    
+                'timeZone': 'America/Sao_Paulo', # CORREÇÃO DE FUSO HORÁRIO
+            },
+            'reminders': {
+                'useDefault': True,
+            },
+        }
 
         event = service.events().insert(calendarId='primary', body=event_body).execute()
         return event.get('id')
     except Exception as e:
-        print(f"Erro create_google_event: {e}")
+        print(f"Erro create_google_event: {e}", flush=True)
         return None
 
 def update_google_event(token_json: str, compromisso):
@@ -161,6 +166,10 @@ def update_google_event(token_json: str, compromisso):
         event['summary'] = compromisso.titulo
         event['start']['dateTime'] = start_time.isoformat()
         event['end']['dateTime'] = end_time.isoformat()
+        
+        # Garante que o fuso horário seja mantido
+        event['start']['timeZone'] = 'America/Sao_Paulo'
+        event['end']['timeZone'] = 'America/Sao_Paulo'
 
         service.events().update(
             calendarId='primary', 
@@ -168,7 +177,7 @@ def update_google_event(token_json: str, compromisso):
             body=event
         ).execute()
     except Exception as e:
-        print(f"Erro update_google_event: {e}")
+        print(f"Erro update_google_event: {e}", flush=True)
 
 def delete_google_event(token_json: str, google_event_id: str):
     if not google_event_id:
@@ -179,4 +188,4 @@ def delete_google_event(token_json: str, google_event_id: str):
     try:
         service.events().delete(calendarId='primary', eventId=google_event_id).execute()
     except Exception as e:
-        print(f"Erro delete_google_event: {e}")
+        print(f"Erro delete_google_event: {e}", flush=True)
