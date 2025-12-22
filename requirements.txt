@@ -3,6 +3,7 @@ uvicorn
 requests
 pydantic
 python-dotenv
+pytz
 openai
 google-api-python-client
 google-auth-httplib2
