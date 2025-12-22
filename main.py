@@ -91,8 +91,7 @@ def process_message_background(data: dict, db: Session):
         # Verifique se o token do Google Calendar está disponível
         token_record = get_token(db, user_id=MAIN_USER_ID)
         
-        # CORREÇÃO: Passar a string JSON bruta para o google_calendar_service
-        # O json.loads() foi removido daqui para evitar o erro de desserialização
+        # Passar a string JSON bruta para o google_calendar_service
         google_token_json = token_record.token_json if token_record else None
 
         # Ações para criar, reagendar, cancelar e consultar compromissos
@@ -167,7 +166,6 @@ def process_message_background(data: dict, db: Session):
         # Envia a resposta de volta via WhatsApp
         # NOTE: A função send_whatsapp_message precisa ser importada ou mockada
         # Para este teste, assumimos que ela está disponível.
-        # Se ela falhar, o erro 401 (Authenticate) aparecerá.
         # send_whatsapp_message(from_number, response_message)
         print(f"LOG (WhatsApp Send): Tentando enviar mensagem para {from_number}: {response_message}", flush=True)
 
@@ -221,6 +219,28 @@ async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
             status_code=500
         )
 
+# --- ROTA TEMPORÁRIA DE LIMPEZA DE TOKEN ---
+@app.get("/admin/clear-token")
+def clear_token(db: Session = Depends(get_db)):
+    """Rota temporária para deletar o token do Google Calendar do DB."""
+    try:
+        # Tenta obter o registro do token
+        token_record = get_token(db, user_id=MAIN_USER_ID)
+        
+        if token_record:
+            # Deleta o registro e commita
+            db.delete(token_record)
+            db.commit()
+            return {"status": "ok", "message": "Token do Google Calendar deletado com sucesso. Por favor, refaça a autenticação."}
+        
+        return {"status": "ok", "message": "Nenhum token encontrado para deletar."}
+    except Exception as e:
+        # Se houver um erro, tenta dar rollback e retorna o erro
+        db.rollback()
+        print(f"Erro ao deletar token: {e}", flush=True)
+        return {"status": "error", "message": f"Erro ao deletar token: {e}"}
+
+
 # --- ROTAS DA APLICAÇÃO ---
 
 @app.get("/")
@@ -243,7 +263,6 @@ def verify_webhook(request: Request):
     if mode and token:
         # Verifica se o modo é 'subscribe' e se o token bate
         if mode == "subscribe" and token == VERIFY_TOKEN:
-            # --- MUDANÇA CRÍTICA AQUI ---
             # O Meta espera PlainTextResponse (texto puro), não HTML.
             # Convertemos challenge para string para garantir.
             print(f"--- SUCESSO: Webhook verificado. Retornando challenge: {challenge} ---", flush=True)
