@@ -65,11 +65,11 @@ def start_auth_flow():
     auth_url, state = flow.authorization_url(
         access_type='offline',
         include_granted_scopes='true',
-        prompt='consent' # NOVO: Força o Google a enviar o refresh_token
+        prompt='consent' # CORREÇÃO: Força o refresh_token
     )
     return auth_url, state 
 
-def handle_auth_callback(full_url: str) -> str:
+def handle_auth_callback(full_url: str) -> str: # CORREÇÃO: Recebe apenas a URL completa
     """Troca o código pelo token."""
     client_config = load_client_config()
     flow = Flow.from_client_config(
@@ -77,6 +77,7 @@ def handle_auth_callback(full_url: str) -> str:
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI
     )
+    # O full_url contém o code e o state
     flow.fetch_token(authorization_response=full_url)
     return flow.credentials.to_json()
 
