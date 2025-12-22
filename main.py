@@ -5,11 +5,10 @@ import json
 import os
 import traceback
 from datetime import datetime, time, date, timedelta
-from pytz import timezone # NOVO: Para lidar com fuso horário
+from pytz import timezone # Para lidar com fuso horário
 
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
-from whatsapp_api import send_whatsapp_message # DESCOMENTADO
-# from nlp_processor import process_message_with_ai # Removido
+from whatsapp_api import send_whatsapp_message 
 import database 
 import google_calendar_service 
 
@@ -44,10 +43,6 @@ class AgendaAction:
 def simple_nlp_parser(message_text: str) -> AgendaAction:
     """
     Parser simples para extrair título e definir a data/hora atual no fuso horário correto.
-    
-    NOTA: Para extrair datas e horas complexas (ex: "amanhã às 15h"),
-    é necessário integrar uma biblioteca NLP mais robusta (ex: dateutil, spaCy)
-    ou a API da OpenAI.
     """
     # 1. Definir o fuso horário correto
     tz = timezone('America/Sao_Paulo')
@@ -92,6 +87,7 @@ def process_message_background(data: dict, db: Session):
     try:
         print(f"LOG PAYLOAD (Background): {json.dumps(data)}", flush=True)
 
+        # CORREÇÃO CRÍTICA: Verifica se o payload contém 'messages' (mensagem de usuário)
         value = data['entry'][0]['changes'][0]['value']
         if not value.get('messages'):
             print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento (é um status ou outro evento).", flush=True)
@@ -99,12 +95,11 @@ def process_message_background(data: dict, db: Session):
 
         # Extração de dados da mensagem
         message_data = value['messages'][0]
-        message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
         message_text = message_data['text']['body']
         from_number = message_data['from']
 
         # Processamento de IA (AGORA USANDO O PARSER SIMPLES)
-        ai_result = simple_nlp_parser(message_text) # MUDANÇA AQUI
+        ai_result = simple_nlp_parser(message_text) 
 
         # Lógica de Ação
         response_message = ""
