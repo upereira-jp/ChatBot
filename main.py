@@ -5,12 +5,13 @@ import json
 import os
 import traceback
 from datetime import datetime, time, date, timedelta
+from pytz import timezone # NOVO: Para lidar com fuso horário
 
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
-# from whatsapp_api import send_whatsapp_message
+from whatsapp_api import send_whatsapp_message # DESCOMENTADO
 # from nlp_processor import process_message_with_ai
-import database # Importa o módulo inteiro para evitar circular import
-import google_calendar_service # Importa o módulo inteiro para evitar circular import
+import database 
+import google_calendar_service 
 
 # Desempacotando as funções do database para manter a compatibilidade com o código original
 get_db = database.get_db
@@ -34,8 +35,13 @@ class MockAgendaAction:
         # Hardcoded data para uma ação de 'agendar' bem-sucedida
         self.action = "agendar"
         self.titulo = "Reunião de Teste (Mock IA)"
-        # Define a data/hora para daqui a 1 hora
-        self.data_hora = datetime.now().replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        
+        # --- CORREÇÃO DE FUSO HORÁRIO ---
+        tz = timezone('America/Sao_Paulo')
+        now_tz = datetime.now(tz).replace(minute=0, second=0, microsecond=0)
+        self.data_hora = now_tz + timedelta(hours=1)
+        # --- FIM DA CORREÇÃO ---
+        
         self.assunto = "Teste de Sincronização"
         self.duracao = 60 # minutos
         self.recorrencia = None
@@ -164,9 +170,7 @@ def process_message_background(data: dict, db: Session):
             response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
 
         # Envia a resposta de volta via WhatsApp
-        # NOTE: A função send_whatsapp_message precisa ser importada ou mockada
-        # Para este teste, assumimos que ela está disponível.
-        # send_whatsapp_message(from_number, response_message)
+        send_whatsapp_message(from_number, response_message) # DESCOMENTADO
         print(f"LOG (WhatsApp Send): Tentando enviar mensagem para {from_number}: {response_message}", flush=True)
 
 
@@ -175,7 +179,7 @@ def process_message_background(data: dict, db: Session):
         try:
             # Tenta extrair o número de telefone em caso de erro
             from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            # send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
+            send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
             print(f"LOG (WhatsApp Send Error): Tentando enviar erro para {from_number}", flush=True)
         except:
             pass # Se não conseguir extrair o número, ignora.
@@ -189,7 +193,7 @@ def process_message_background(data: dict, db: Session):
 @app.get("/auth/google/start")
 async def google_auth_start():
     try:
-        auth_url, _ = google_auth_flow_start() # CORREÇÃO: Ignora o state
+        auth_url, _ = google_auth_flow_start()
         return RedirectResponse(auth_url)
     except Exception as e:
         print(f"Erro ao iniciar o fluxo de autenticação: {e}", flush=True)
@@ -201,8 +205,8 @@ async def google_auth_start():
 @app.get("/auth/google/callback")
 async def google_auth_callback(request: Request, db: Session = Depends(get_db)):
     try:
-        full_url = str(request.url) # CORREÇÃO: Obtém a URL completa
-        token_info = google_auth_flow_callback(full_url) # CORREÇÃO: Passa a URL completa
+        full_url = str(request.url)
+        token_info = google_auth_flow_callback(full_url)
 
         # O token_info já é a string JSON, não precisa de json.dumps()
         save_token(db, user_id=MAIN_USER_ID, token_json=token_info)
