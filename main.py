@@ -92,16 +92,13 @@ def process_message_background(data: dict, db: Session):
     try:
         print(f"LOG PAYLOAD (Background): {json.dumps(data)}", flush=True)
 
-        # Verifica se é um evento de mensagem (formato Meta)
-        if not (data.get('entry') and
-                data['entry'][0].get('changes') and
-                data['entry'][0]['changes'][0].get('value') and
-                data['entry'][0]['changes'][0]['value'].get('messages')):
-
-            print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento.", flush=True)
+        value = data['entry'][0]['changes'][0]['value']
+        if not value.get('messages'):
+            print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento (é um status ou outro evento).", flush=True)
             return
 
         # Extração de dados da mensagem
+        message_data = value['messages'][0]
         message_data = data['entry'][0]['changes'][0]['value']['messages'][0]
         message_text = message_data['text']['body']
         from_number = message_data['from']
