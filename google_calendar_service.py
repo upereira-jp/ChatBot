@@ -123,18 +123,18 @@ def create_google_event(token_json: str, compromisso):
         duracao = getattr(compromisso, 'duracao', 60) or 60
         end_time = start_time + timedelta(minutes=duracao)
 
-        event_body = {
+       event_body = {
             'summary': compromisso.titulo,
             'location': 'Online',
             'description': compromisso.assunto,
             'start': {
                 'dateTime': start_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # Adicionando o fuso horário
+                'timeZone': 'America/Sao_Paulo', # ADICIONADO
             },
             'end': {
                 'dateTime': end_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # Adicionando o fuso horário
-            }
+                'timeZone': 'America/Sao_Paulo', # ADICIONADO
+            },    
 
         event = service.events().insert(calendarId='primary', body=event_body).execute()
         return event.get('id')
