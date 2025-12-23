@@ -11,4 +11,4 @@ google-auth-oauthlib
 SQLAlchemy
 psycopg2-binary
 gunicorn
-twilio==9.8.8  
+  
