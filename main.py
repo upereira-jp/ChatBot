@@ -119,122 +119,108 @@ VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "meu_token_real_123")
 # --- FUNÇÃO DE PROCESSAMENTO EM SEGUNDO PLANO ---
 def process_message_background(data: dict, db: Session):
     """
-    Função que processa a lógica de negócios real (IA, DB, Google Calendar, Resposta do WhatsApp).
-    Executada em background para garantir resposta imediata ao Meta.
+    Função processa a lógica de negócios real usando IA (OpenAI), 
+    DB local e sincronização com Google Calendar.
     """
     try:
         print(f"LOG PAYLOAD (Background): {json.dumps(data)}", flush=True)
 
-        # CORREÇÃO CRÍTICA: Verifica se o payload contém 'messages' (mensagem de usuário)
+        # 1. Verificação de Payload do WhatsApp
         value = data['entry'][0]['changes'][0]['value']
         if not value.get('messages'):
-            print("LOG (Background): Payload recebido não é uma mensagem de usuário para processamento (é um status ou outro evento).", flush=True)
+            print("LOG (Background): Evento de status recebido. Ignorando.", flush=True)
             return
 
-        # Extração de dados da mensagem
+        # 2. Extração de dados básicos
         message_data = value['messages'][0]
         message_text = message_data['text']['body']
         from_number = message_data['from']
 
-        # Processamento de IA (AGORA USANDO O PARSER SIMPLES)
-        ai_result = simple_nlp_parser(message_text) 
-
-        # Lógica de Ação
-        response_message = ""
-
-        # Verifique se o token do Google Calendar está disponível
-        token_record = get_token(db, user_id=MAIN_USER_ID)
+        # 3. Processamento de IA (Chamada ao ai_service que criamos)
+        # Importante: certifique-se de ter 'import ai_service' no topo do seu main.py
+        import ai_service
+        ai_result = ai_service.get_ai_response(message_text)
         
-        # Passar a string JSON bruta para o google_calendar_service
+        action = ai_result.get("action")
+        # A IA já sugere uma resposta educada e direta no campo 'resposta_whatsapp'
+        response_message = ai_result.get("resposta_whatsapp", "Processando sua solicitação...")
+
+        # 4. Recuperação de credenciais do Google
+        token_record = get_token(db, user_id=MAIN_USER_ID)
         google_token_json = token_record.token_json if token_record else None
 
-        # Ações para criar, reagendar, cancelar e consultar compromissos
-        if ai_result.action == "agendar":
-            if not ai_result.data_hora:
-                response_message = "Não consegui identificar a data e hora. Por favor, especifique melhor."
+        # 5. Execução da Lógica de Negócio baseada na decisão da IA
+        
+        if action == "agendar":
+            data_iso = ai_result.get("data_hora")
+            if not data_iso:
+                # Caso a IA não tenha conseguido extrair a data, a resposta já pedirá os dados.
+                pass 
             else:
-                # O objeto datetime.now(tz) já é timezone-aware
+                # Converte o ISO da IA para objeto datetime para o banco de dados
+                dt_obj = datetime.fromisoformat(data_iso)
+                
                 compromisso = create_compromisso(
                     db,
-                    titulo=ai_result.titulo,
-                    data_hora=ai_result.data_hora,
-                    assunto=ai_result.assunto,
-                    duracao=ai_result.duracao,
-                    recorrencia=ai_result.recorrencia
+                    titulo=ai_result.get("titulo"),
+                    data_hora=dt_obj,
+                    assunto=ai_result.get("assunto"),
+                    duracao=ai_result.get("duracao", 60)
                 )
-                response_message = f"Compromisso agendado com sucesso! ID Local: {compromisso.id}. Título: {compromisso.titulo} em {compromisso.data_hora.strftime('%d/%m/%Y %H:%M')}."
 
                 if google_token_json:
-                    # Chamada corrigida com o prefixo do módulo
                     event_id = google_calendar_service.create_google_event(google_token_json, compromisso)
                     if event_id:
                         update_compromisso(db, compromisso.id, {"google_event_id": event_id})
-                        response_message += f" Sincronizado com o Google Calendar."
                 else:
-                    response_message += f" \n\n⚠️ **Atenção:** O Google Calendar não está sincronizado. Acesse a rota /auth/google/start para autorizar."
+                    response_message += "\n\n⚠️ O Google Calendar não está sincronizado."
 
-        elif ai_result.action == "reagendar":
-            if not ai_result.id_compromisso or not ai_result.data_hora:
-                response_message = "Para reagendar, preciso do ID do compromisso e da nova data/hora."
-            else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
+        elif action == "reagendar":
+            id_comp = ai_result.get("id_compromisso")
+            data_iso = ai_result.get("data_hora")
+            
+            if id_comp and data_iso:
+                dt_obj = datetime.fromisoformat(data_iso)
+                compromisso = get_compromisso_por_id(db, id_comp)
                 if compromisso:
-                    update_compromisso(db, compromisso.id, {"data_hora": ai_result.data_hora})
-                    response_message = f"Compromisso ID {compromisso.id} reagendado para {ai_result.data_hora.strftime('%d/%m/%Y %H:%M')}."
-
+                    update_compromisso(db, compromisso.id, {"data_hora": dt_obj})
                     if google_token_json and compromisso.google_event_id:
-                        # Chamada corrigida com o prefixo do módulo
                         google_calendar_service.update_google_event(google_token_json, compromisso)
-                        response_message += " Sincronizado com o Google Calendar."
-                else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
 
-        elif ai_result.action == "cancelar":
-            if not ai_result.id_compromisso:
-                response_message = "Para cancelar, preciso do ID do compromisso."
-            else:
-                compromisso = get_compromisso_por_id(db, ai_result.id_compromisso)
+        elif action == "cancelar":
+            id_comp = ai_result.get("id_compromisso")
+            if id_comp:
+                compromisso = get_compromisso_por_id(db, id_comp)
                 if compromisso:
-                    delete_compromisso(db, compromisso.id)
-                    response_message = f"Compromisso ID {compromisso.id} cancelado com sucesso."
-
                     if google_token_json and compromisso.google_event_id:
-                        # Chamada corrigida com o prefixo do módulo
                         google_calendar_service.delete_google_event(google_token_json, compromisso.google_event_id)
-                        response_message += " Sincronizado com o Google Calendar."
-                else:
-                    response_message = f"Compromisso com ID {ai_result.id_compromisso} não encontrado."
+                    delete_compromisso(db, compromisso.id)
 
-        elif ai_result.action == "consultar":
-            data_consulta = ai_result.data_hora.date() if ai_result.data_hora else datetime.now().date()
-            compromissos = get_compromissos_do_dia(db, datetime.combine(data_consulta, datetime.min.time()))
-
+        elif action == "consultar":
+            # Para consultas, usamos a data que a IA identificou ou hoje
+            data_iso = ai_result.get("data_hora")
+            dt_consulta = datetime.fromisoformat(data_iso).date() if data_iso else datetime.now().date()
+            
+            compromissos = get_compromissos_do_dia(db, datetime.combine(dt_consulta, datetime.min.time()))
             if compromissos:
-                lista = "\n".join([f"ID {c.id}: {c.titulo} ({c.assunto}) às {c.data_hora.strftime('%H:%M')}" for c in compromissos])
-                response_message = f"Compromissos para {data_consulta.strftime('%d/%m/%Y')}:\n{lista}"
+                lista = "\n".join([f"- ID {c.id}: {c.titulo} às {c.data_hora.strftime('%H:%M')}" for c in compromissos])
+                response_message = f"Agenda para {dt_consulta.strftime('%d/%m/%Y')}:\n{lista}"
             else:
-                response_message = f"Nenhum compromisso encontrado para {data_consulta.strftime('%d/%m/%Y')}."
+                response_message = f"Não encontrei compromissos para {dt_consulta.strftime('%d/%m/%Y')}."
 
-        else:
-            response_message = "Desculpe, não entendi a sua solicitação. Tente algo como: 'Agendar reunião amanhã às 10h' ou 'Consultar agenda de hoje'."
-
-        # Envia a resposta de volta via WhatsApp
+        # 6. Envio da Resposta Final via WhatsApp
         send_whatsapp_message(from_number, response_message)
-        print(f"LOG (WhatsApp Send): Tentando enviar mensagem para {from_number}: {response_message}", flush=True)
-
+        print(f"LOG (WhatsApp Send): Resposta enviada para {from_number}", flush=True)
 
     except Exception as e:
-        # Tenta enviar a mensagem de erro, se o from_number estiver disponível
-        try:
-            # Tenta extrair o número de telefone em caso de erro
-            from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            send_whatsapp_message(from_number, "Ocorreu um erro interno ao processar sua solicitação.")
-            print(f"LOG (WhatsApp Send Error): Tentando enviar erro para {from_number}", flush=True)
-        except:
-            pass # Se não conseguir extrair o número, ignora.
-
-        error_detail = f"Erro no processamento da mensagem (Background): {e}\n{traceback.format_exc()}"
+        error_detail = f"Erro no processamento da mensagem: {e}\n{traceback.format_exc()}"
         print(error_detail, flush=True)
+        try:
+            # Tenta avisar o usuário do erro técnico
+            from_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
+            send_whatsapp_message(from_number, "Desculpe, tive um problema ao processar isso agora. Pode repetir?")
+        except:
+            pass
 
 
 # --- ROTAS DE AUTENTICAÇÃO DO GOOGLE CALENDAR ---
