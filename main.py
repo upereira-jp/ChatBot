@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse, PlainTextResponse,
 from sqlalchemy.orm import Session
 import json
 import os
+import re
 import traceback
 from datetime import datetime, time, date, timedelta
 from pytz import timezone # Para lidar com fuso horário
@@ -42,29 +43,66 @@ class AgendaAction:
 # --- PARSER SIMPLES (Substitui o Mock da IA) ---
 def simple_nlp_parser(message_text: str) -> AgendaAction:
     """
-    Parser simples para extrair título e definir a data/hora atual no fuso horário correto.
+    Parser melhorado com Regex para extrair horário e limpar o título.
     """
-    # 1. Definir o fuso horário correto
     tz = timezone('America/Sao_Paulo')
+    agora = datetime.now(tz)
+    target_date = agora
+
+    # 1. Tenta encontrar padrões de hora (ex: 14h, 14:00, 14h30)
+    # Regex procura por digitos seguidos de h ou :
+    time_pattern = re.search(r'\b(\d{1,2})(?:h|:)(\d{2})?\b', message_text, re.IGNORECASE)
     
-    # 2. Definir a data/hora atual no fuso horário de São Paulo
-    # Usamos now(tz) para garantir que o agendamento seja no fuso horário correto
-    data_hora_agora = datetime.now(tz)
+    nova_hora = agora.hour
+    novo_minuto = agora.minute
     
-    # 3. Extrair o título (usamos a mensagem inteira como título)
-    titulo = message_text.strip()
+    clean_text = message_text
+
+    if time_pattern:
+        # Extrai hora e minuto encontrados
+        hora_str = time_pattern.group(1)
+        minuto_str = time_pattern.group(2) or "00"
+        
+        try:
+            nova_hora = int(hora_str)
+            novo_minuto = int(minuto_str)
+            
+            # Ajuste básico: Se a hora solicitada já passou hoje, assume que é amanhã
+            # (Ex: são 15h e usuário pede "reunião às 10h", joga para amanhã)
+            if nova_hora < agora.hour or (nova_hora == agora.hour and novo_minuto < agora.minute):
+                target_date = agora + timedelta(days=1)
+            
+            # Remove o horário do texto para limpar o título
+            # Removemos o trecho encontrado (ex: "14h") da string original
+            clean_text = message_text.replace(time_pattern.group(0), "").strip()
+            
+            # Remove palavras de ligação soltas que podem ter sobrado (ex: "Reunião às")
+            clean_text = re.sub(r'\b(às|as|h)\b', '', clean_text, flags=re.IGNORECASE).strip()
+            # Remove espaços duplos
+            clean_text = re.sub(r'\s+', ' ', clean_text)
+
+        except ValueError:
+            pass # Se der erro na conversão, mantém horário atual
+
+    # Atualiza o objeto de data com a hora encontrada
+    final_datetime = target_date.replace(hour=nova_hora, minute=novo_minuto, second=0, microsecond=0)
+
+    # 2. Definição do Título
+    # Se depois da limpeza não sobrou nada, usa um padrão.
+    titulo = clean_text if clean_text else "Nova Reunião"
     
-    # 4. Criar a ação de agendamento
+    # Capitaliza a primeira letra
+    titulo = titulo[0].upper() + titulo[1:] if titulo else titulo
+
     return AgendaAction(
         action="agendar",
         titulo=titulo,
-        data_hora=data_hora_agora,
-        assunto=f"Agendado via WhatsApp: {titulo}",
-        duracao=60, # Default de 60 minutos
+        data_hora=final_datetime,
+        assunto=f"Original: {message_text}", # Guarda a msg original na descrição
+        duracao=60,
         recorrencia=None,
         id_compromisso=None
     )
-
 # --- FIM DO PARSER SIMPLES ---
 
 # Inicializa a aplicação FastAPI
