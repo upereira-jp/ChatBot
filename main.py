@@ -7,7 +7,7 @@ import re
 import traceback
 from datetime import datetime, time, date, timedelta
 from pytz import timezone # Para lidar com fuso horário
-
+import ai_service
 # --- SUAS IMPORTAÇÕES DE MÓDULOS LOCAIS ---
 from whatsapp_api import send_whatsapp_message 
 import database 
