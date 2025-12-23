@@ -114,6 +114,8 @@ def google_auth_flow_callback(full_url: str) -> str:
 
 # --- Funções de CRUD do Calendar ---
 
+# Em google_calendar_service.py
+
 def create_google_event(token_json: str, compromisso):
     service = get_calendar_service(token_json)
     if not service:
@@ -124,17 +126,23 @@ def create_google_event(token_json: str, compromisso):
         duracao = getattr(compromisso, 'duracao', 60) or 60
         end_time = start_time + timedelta(minutes=duracao)
 
+        # --- CORREÇÃO DE FUSO HORÁRIO ---
+        # Removemos a informação de timezone do objeto datetime (tornando-o naive)
+        # e deixamos o campo 'timeZone' do payload controlar a localização.
+        start_iso = start_time.replace(tzinfo=None).isoformat()
+        end_iso = end_time.replace(tzinfo=None).isoformat()
+
         event_body = {
             'summary': compromisso.titulo,
             'location': 'Online',
             'description': compromisso.assunto,
             'start': {
-                'dateTime': start_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # CORREÇÃO DE FUSO HORÁRIO
+                'dateTime': start_iso, 
+                'timeZone': 'America/Sao_Paulo', 
             },
             'end': {
-                'dateTime': end_time.isoformat(),
-                'timeZone': 'America/Sao_Paulo', # CORREÇÃO DE FUSO HORÁRIO
+                'dateTime': end_iso,
+                'timeZone': 'America/Sao_Paulo',
             },
             'reminders': {
                 'useDefault': True,
