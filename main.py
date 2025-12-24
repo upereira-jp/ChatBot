@@ -27,6 +27,12 @@ get_compromisso_por_id = database.get_compromisso_por_id
 google_auth_flow_start = google_calendar_service.google_auth_flow_start
 google_auth_flow_callback = google_calendar_service.google_auth_flow_callback
 
+try:
+    print("Verificando/Criando tabelas no banco de dados...")
+    database.Base.metadata.create_all(bind=database.engine)
+    print("Tabelas prontas para uso!")
+except Exception as e:
+    print(f"Erro ao criar tabelas: {e}")
 
 # --- CLASSE DE AÇÃO (Substitui o Mock) ---
 class AgendaAction:
