@@ -230,42 +230,53 @@ def process_message_background(data: dict, db: Session):
 
 @app.get("/privacidade", response_class=HTMLResponse)
 async def privacidade():
-    return """
-    <html>
-        <head><title>Política de Privacidade - Alfred</title></head>
-        <body style="font-family: Arial, sans-serif; padding: 40px; line-height: 1.6; max-width: 800px; margin: auto;">
+    """
+    Retorna a página de Política de Privacidade formatada em HTML.
+    Esta URL deve ser inserida no painel do Meta Developers.
+    """
+    content = """
+    <!DOCTYPE html>
+    <html lang="pt-br">
+        <head>
+            <meta charset="UTF-8">
+            <title>Política de Privacidade - Alfred</title>
+            <style>
+                body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; line-height: 1.6; max-width: 800px; margin: auto; color: #333; }
+                h1 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+                h2 { color: #2c3e50; margin-top: 30px; }
+                p { margin-bottom: 15px; text-align: justify; }
+                ul { margin-bottom: 15px; }
+                .footer { margin-top: 50px; font-size: 0.9em; color: #7f8c8d; border-top: 1px solid #eee; pt: 20px; }
+            </style>
+        </head>
+        <body>
             <h1>Política de Privacidade</h1>
             <p><strong>Última atualização: 24/12/2025</strong></p>
-            <p>A sua privacidade é importante para nós. É política do Alfred respeitar a sua privacidade em relação a qualquer informação sua que possamos coletar no site Alfred, e outros sites que possuímos e operamos.
+            
+            <p>A sua privacidade é importante para nós. É política do <strong>Alfred</strong> respeitar a sua privacidade em relação a qualquer informação sua que possamos coletar no serviço Alfred, e outros sites que possuímos e operamos.</p>
 
-Solicitamos informações pessoais apenas quando realmente precisamos delas para lhe fornecer um serviço. Fazemo-lo por meios justos e legais, com o seu conhecimento e consentimento. Também informamos por que estamos coletando e como será usado.
+            <p>Solicitamos informações pessoais apenas quando realmente precisamos delas para lhe fornecer um serviço, como a integração com o <strong>Google Calendar</strong> e <strong>WhatsApp Business API</strong>. Fazemo-lo por meios justos e legais, com o seu conhecimento e consentimento. Também informamos por que estamos coletando e como será usado.</p>
 
-Apenas retemos as informações coletadas pelo tempo necessário para fornecer o serviço solicitado. Quando armazenamos dados, protegemos dentro de meios comercialmente aceitáveis ​​para evitar perdas e roubos, bem como acesso, divulgação, cópia, uso ou modificação não autorizados.
+            <p>Apenas retemos as informações coletadas pelo tempo necessário para fornecer o serviço solicitado. Quando armazenamos dados (como tokens de acesso), protegemos dentro de meios comercialmente aceitáveis para evitar perdas e roubos, bem como acesso, divulgação, cópia, uso ou modificação não autorizados.</p>
 
-Não compartilhamos informações de identificação pessoal publicamente ou com terceiros, exceto quando exigido por lei.
+            <p>Não compartilhamos informações de identificação pessoal publicamente ou com terceiros, exceto quando exigido por lei.</p>
 
-O nosso site pode ter links para sites externos que não são operados por nós. Esteja ciente de que não temos controle sobre o conteúdo e práticas desses sites e não podemos aceitar responsabilidade por suas respectivas políticas de privacidade.
+            <h2>Compromisso do Usuário</h2>
+            <p>O usuário se compromete a fazer uso adequado dos conteúdos e da informação que o Alfred oferece:</p>
+            <ul>
+                <li><strong>A)</strong> Não se envolver em atividades que sejam ilegais ou contrárias à boa fé;</li>
+                <li><strong>B)</strong> Não causar danos aos sistemas físicos (hardwares) e lógicos (softwares) do Alfred;</li>
+                <li><strong>C)</strong> Não disseminar vírus informáticos ou quaisquer outros sistemas que sejam capazes de causar danos.</li>
+            </ul>
 
-Você é livre para recusar a nossa solicitação de informações pessoais, entendendo que talvez não possamos fornecer alguns dos serviços desejados.
-
-O uso continuado de nosso site será considerado como aceitação de nossas práticas em torno de privacidade e informações pessoais. Se você tiver alguma dúvida sobre como lidamos com dados do usuário e informações pessoais, entre em contacto connosco.
-
-
-Compromisso do Usuário
-
-O usuário se compromete a fazer uso adequado dos conteúdos e da informação que o Alfred oferece no site e com caráter enunciativo, mas não limitativo:
-
-
-A) Não se envolver em atividades que sejam ilegais ou contrárias à boa fé a à ordem pública;
-
-B) Não difundir propaganda ou conteúdo de natureza racista, xenofóbica, jogos de sorte ou azar, qualquer tipo de pornografia ilegal, de apologia ao terrorismo ou contra os direitos humanos;
-
-C) Não causar danos aos sistemas físicos (hardwares) e lógicos (softwares) do Alfred, de seus fornecedores ou terceiros, para introduzir ou disseminar vírus informáticos ou quaisquer outros sistemas de hardware ou software que sejam capazes de causar danos anteriormente mencionados.
-
-Mais informações
-Esperemos que esteja esclarecido e, como mencionado anteriormente, se houver algo que você não tem certeza se precisa ou não, geralmente é mais seguro deixar os cookies ativados, caso interaja com um dos recursos que você usa em nosso site.
-
-Esta política é efetiva a partir de 24 December 2025 19:30</p>
+            <div class="footer">
+                <p>Esta política é efetiva a partir de 24 de Dezembro de 2025.</p>
+                <p>Contato: https://alfred-5klb.onrender.com</p>
+            </div>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=content, status_code=200)
 
 # --- ROTAS DE AUTENTICAÇÃO DO GOOGLE CALENDAR ---
 
