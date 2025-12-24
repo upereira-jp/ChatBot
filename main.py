@@ -278,6 +278,66 @@ async def privacidade():
     """
     return HTMLResponse(content=content, status_code=200)
 
+@app.get("/termos", response_class=HTMLResponse)
+async def termos():
+    """
+    Retorna a página de Termos de Serviço formatada em HTML.
+    Esta URL é necessária para a conformidade do app no Meta Developers.
+    """
+    content = """
+    <!DOCTYPE html>
+    <html lang="pt-br">
+        <head>
+            <meta charset="UTF-8">
+            <title>Termos de Serviço - Alfred</title>
+            <style>
+                body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; line-height: 1.6; max-width: 800px; margin: auto; color: #333; }
+                h1 { color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+                h2 { color: #2c3e50; margin-top: 30px; font-size: 1.4em; }
+                p { margin-bottom: 15px; text-align: justify; }
+                ol { margin-bottom: 15px; }
+                li { margin-bottom: 10px; }
+                .footer { margin-top: 50px; font-size: 0.9em; color: #7f8c8d; border-top: 1px solid #eee; padding-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <h1>Termos de Serviço</h1>
+            
+            <h2>1. Termos</h2>
+            <p>Ao acessar ao site <a href="https://alfred-5klb.onrender.com" style="color: #3498db; text-decoration: none;">Alfred</a>, concorda em cumprir estes termos de serviço, todas as leis e regulamentos aplicáveis e concorda que é responsável pelo cumprimento de todas as leis locais aplicáveis. Os materiais contidos neste site são protegidos pelas leis de direitos autorais e marcas comerciais aplicáveis.</p>
+
+            <h2>2. Uso de Licença</h2>
+            <p>É concedida permissão para baixar temporariamente uma cópia dos materiais (informações ou software) no site Alfred, apenas para visualização transitória pessoal e não comercial. Esta é a concessão de uma licença, não uma transferência de título e, sob esta licença, você não pode:</p>
+            <ol>
+                <li>Modificar ou copiar os materiais;</li>
+                <li>Usar os materiais para qualquer finalidade comercial ou para exibição pública;</li>
+                <li>Tentar descompilar ou fazer engenharia reversa de qualquer software contido no site Alfred;</li>
+                <li>Remover quaisquer direitos autorais ou outras notações de propriedade;</li>
+                <li>Transferir os materiais para outra pessoa ou 'espelhar' os materiais em outro servidor.</li>
+            </ol>
+
+            <h2>3. Isenção de Responsabilidade</h2>
+            <p>Os materiais no site da Alfred são fornecidos 'como estão'. Alfred não oferece garantias, expressas ou implícitas, e, por este meio, isenta e nega todas as outras garantias, incluindo, sem limitação, condições de comercialização ou adequação a um fim específico.</p>
+
+            <h2>4. Limitações</h2>
+            <p>Em nenhum caso o Alfred ou seus fornecedores serão responsáveis por quaisquer danos (incluindo, sem limitação, danos por perda de dados ou lucro ou devido a interrupção dos negócios) decorrentes do uso ou da incapacidade de usar os materiais em Alfred.</p>
+
+            <h2>5. Precisão dos Materiais</h2>
+            <p>Os materiais exibidos no site da Alfred podem incluir erros técnicos, tipográficos ou fotográficos. Alfred não garante que qualquer material em seu site seja preciso, completo ou atual.</p>
+
+            <h2>6. Links</h2>
+            <p>O Alfred não analisou todos os sites vinculados ao seu site e não é responsável pelo conteúdo de nenhum site vinculado. O uso de qualquer site vinculado é por conta e risco do usuário.</p>
+
+            <div class="footer">
+                <p><strong>Modificações:</strong> O Alfred pode revisar estes termos a qualquer momento, sem aviso prévio. Ao usar este site, você concorda em ficar vinculado à versão atual desses termos de serviço.</p>
+                <p><strong>Lei Aplicável:</strong> Estes termos são regidos pelas leis locais e você se submete à jurisdição exclusiva dos tribunais naquela localidade.</p>
+                <p>Contato: blackhaus.com.br</p>
+            </div>
+        </body>
+    </html>
+    """
+    return HTMLResponse(content=content, status_code=200)
+
 # --- ROTAS DE AUTENTICAÇÃO DO GOOGLE CALENDAR ---
 
 @app.get("/auth/google/start")
