@@ -397,9 +397,56 @@ def clear_token(db: Session = Depends(get_db)):
 
 # --- ROTAS DA APLICAÇÃO ---
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 def read_root():
-    return {"message": "Servidor está funcionando!"}
+    """
+    Retorna a Landing Page do Alfred. 
+    Essencial para aprovação do Display Name na Meta.
+    """
+    content = """
+    <!DOCTYPE html>
+    <html lang="pt-br">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Alfred - Assessor Empresarial</title>
+        <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; text-align: center; }
+            .container { background: #f9f9f9; padding: 40px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            h1 { color: #2c3e50; font-size: 2.5em; margin-bottom: 10px; }
+            .subtitle { color: #3498db; font-size: 1.2em; font-weight: bold; margin-bottom: 30px; }
+            .description { font-size: 1.1em; color: #555; margin-bottom: 30px; }
+            .footer { margin-top: 50px; font-size: 0.9em; color: #7f8c8d; border-top: 1px solid #ddd; padding-top: 20px; }
+            .highlight { color: #2ecc71; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Alfred</h1>
+            <p class="subtitle">Assessor Empresarial Inteligente</p>
+            
+            <p class="description">
+                Simplifique sua rotina. O <span class="highlight">Alfred</span> cuida do agendamento e organização 
+                dos seus eventos para você focar no que realmente importa. Integrado diretamente ao seu 
+                WhatsApp e Google Calendar.
+            </p>
+
+            <div class="features">
+                <p>✅ Agendamento Automático</p>
+                <p>✅ Sincronização em Tempo Real</p>
+                <p>✅ Assistente Pessoal via WhatsApp</p>
+            </div>
+
+            <div class="footer">
+                <p>&copy; 2026 <strong>Alfred - Assessor Empresarial</strong></p>
+                <p>Contato: alfred-5klb.onrender.com</p>
+                <p><a href="/privacidade">Política de Privacidade</a> | <a href="/termos">Termos de Uso</a></p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=content, status_code=200)
 
 # --- ROTA DE VERIFICAÇÃO DO WEBHOOK (GET) ---
 # Esta é a rota crítica que estava falhando
